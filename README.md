@@ -3,6 +3,7 @@
 This is a repository to add hierarchy to the Transformer.
 
 Below is the original README for the Pytorch Transformer implementation. Thank you for the code!
+
 --------------------------------------------------------------
 
 # Attention is all you need: A Pytorch Implementation
