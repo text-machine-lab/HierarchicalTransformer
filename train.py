@@ -15,6 +15,10 @@ import transformer.Constants as Constants
 from dataset import TranslationDataset, paired_collate_fn
 from transformer.Models import Transformer
 from transformer.Optim import ScheduledOptim
+from torch.utils.tensorboard import SummaryWriter
+import datetime
+
+writer = None
 
 def cal_performance(pred, gold, smoothing=False):
     ''' Apply label smoothing if needed '''
@@ -52,7 +56,7 @@ def cal_loss(pred, gold, smoothing):
     return loss
 
 
-def train_epoch(model, training_data, optimizer, device, smoothing):
+def train_epoch(epoch_idx, model, training_data, optimizer, device, smoothing):
     ''' Epoch operation in training phase'''
 
     model.train()
@@ -61,9 +65,8 @@ def train_epoch(model, training_data, optimizer, device, smoothing):
     n_word_total = 0
     n_word_correct = 0
 
-    for batch in tqdm(
-            training_data, mininterval=2,
-            desc='  - (Training)   ', leave=False):
+
+    for batch_idx, batch in enumerate(tqdm(training_data, desc='  - (Training)   ', leave=False)):
 
         # prepare data
         src_seq, src_pos, tgt_seq, tgt_pos = map(lambda x: x.to(device), batch)
@@ -88,11 +91,14 @@ def train_epoch(model, training_data, optimizer, device, smoothing):
         n_word_total += n_word
         n_word_correct += n_correct
 
+        tb_idx = epoch_idx * len(training_data) + batch_idx
+        writer.add_scalar('training_loss', loss.item() / n_word, tb_idx)
+
     loss_per_word = total_loss/n_word_total
     accuracy = n_word_correct/n_word_total
     return loss_per_word, accuracy
 
-def eval_epoch(model, validation_data, device):
+def eval_epoch(epoch_idx, model, validation_data, device):
     ''' Epoch operation in evaluation phase '''
 
     model.eval()
@@ -103,7 +109,7 @@ def eval_epoch(model, validation_data, device):
 
     with torch.no_grad():
         for batch in tqdm(
-                validation_data, mininterval=2,
+                validation_data,
                 desc='  - (Validation) ', leave=False):
 
             # prepare data
@@ -148,7 +154,7 @@ def train(model, training_data, validation_data, optimizer, device, opt):
         print('[ Epoch', epoch_i, ']')
 
         start = time.time()
-        train_loss, train_accu = train_epoch(
+        train_loss, train_accu = train_epoch(epoch_i,
             model, training_data, optimizer, device, smoothing=opt.label_smoothing)
         print('  - (Training)   ppl: {ppl: 8.5f}, accuracy: {accu:3.3f} %, '\
               'elapse: {elapse:3.3f} min'.format(
@@ -156,7 +162,7 @@ def train(model, training_data, validation_data, optimizer, device, opt):
                   elapse=(time.time()-start)/60))
 
         start = time.time()
-        valid_loss, valid_accu = eval_epoch(model, validation_data, device)
+        valid_loss, valid_accu = eval_epoch(epoch_i, model, validation_data, device)
         print('  - (Validation) ppl: {ppl: 8.5f}, accuracy: {accu:3.3f} %, '\
                 'elapse: {elapse:3.3f} min'.format(
                     ppl=math.exp(min(valid_loss, 100)), accu=100*valid_accu,
@@ -189,6 +195,18 @@ def train(model, training_data, validation_data, optimizer, device, opt):
                     epoch=epoch_i, loss=valid_loss,
                     ppl=math.exp(min(valid_loss, 100)), accu=100*valid_accu))
 
+    # This code allows for saving a randomly initialized model
+    if opt.epoch == 0:
+        model_state_dict = model.state_dict()
+        model_name = opt.save_model + '.chkpt'
+        checkpoint = {
+            'model': model_state_dict,
+            'settings': opt,
+            'epoch': 0}
+        torch.save(checkpoint, model_name)
+        print('    - [Info] Zero epochs run, so model is random. The checkpoint file has been updated.')
+
+
 def main():
     ''' Main function '''
     parser = argparse.ArgumentParser()
@@ -207,6 +225,7 @@ def main():
     parser.add_argument('-n_head', type=int, default=8)
     parser.add_argument('-n_layers', type=int, default=6)
     parser.add_argument('-n_warmup_steps', type=int, default=4000)
+    parser.add_argument('-lr_factor', type=float, default=1.0)
 
     parser.add_argument('-dropout', type=float, default=0.1)
     parser.add_argument('-embs_share_weight', action='store_true')
@@ -259,7 +278,7 @@ def main():
         optim.Adam(
             filter(lambda x: x.requires_grad, transformer.parameters()),
             betas=(0.9, 0.98), eps=1e-09),
-        opt.d_model, opt.n_warmup_steps)
+        opt.d_model, opt.n_warmup_steps, lr_factor=opt.lr_factor)
 
     train(transformer, training_data, validation_data, optimizer, device ,opt)
 
@@ -290,4 +309,10 @@ def prepare_dataloaders(data, opt):
 
 
 if __name__ == '__main__':
+    # new code to run Tensorboard
+    writer = SummaryWriter('logdir/' + str(datetime.datetime.now()))
+
     main()
+
+    # must close writer to save changes to Tensorboard
+    writer.close()

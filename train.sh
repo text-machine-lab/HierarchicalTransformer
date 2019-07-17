@@ -1,1 +1,1 @@
-python train.py -data data/babywmt14.pt -save_model trained -save_mode best -proj_share_weight -label_smoothing -epoch=1
+python train.py -data data/babywmt14.pt -save_model trained -save_mode best -proj_share_weight -label_smoothing -epoch=5 -n_warmup_steps=4000 -n_layers=6 -lr_factor=1.0
