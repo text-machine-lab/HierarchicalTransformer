@@ -1,0 +1,1 @@
+python train.py -data data/babywmt14.pt -save_model trained -save_mode best -proj_share_weight -label_smoothing -epoch=1
