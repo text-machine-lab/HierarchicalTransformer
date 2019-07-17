@@ -1,3 +1,10 @@
+# Hierarchical Transformer
+
+This is a repository to add hierarchy to the Transformer.
+
+Below is the original README for the Pytorch Transformer implementation. Thank you for the code!
+--------------------------------------------------------------
+
 # Attention is all you need: A Pytorch Implementation
 
 This is a PyTorch implementation of the Transformer model in "[Attention is All You Need](https://arxiv.org/abs/1706.03762)" (Ashish Vaswani, Noam Shazeer, Niki Parmar, Jakob Uszkoreit, Llion Jones, Aidan N. Gomez, Lukasz Kaiser, Illia Polosukhin, arxiv, 2017). 
