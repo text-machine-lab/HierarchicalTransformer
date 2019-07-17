@@ -17,10 +17,10 @@ def read_instances_from_file(inst_file, max_sent_len, keep_case):
                 trimmed_sent_count += 1
             word_inst = words[:max_sent_len]
 
-            if word_inst:
-                word_insts += [[Constants.BOS_WORD] + word_inst + [Constants.EOS_WORD]]
-            else:
-                word_insts += [None]
+            #if word_inst:
+            word_insts += [[Constants.BOS_WORD] + word_inst + [Constants.EOS_WORD]]
+            #else:
+            #    word_insts += [None]
 
     print('[Info] Get {} instances from {}'.format(len(word_insts), inst_file))
 
