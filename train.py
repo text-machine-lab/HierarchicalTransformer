@@ -129,6 +129,9 @@ def eval_epoch(epoch_idx, model, validation_data, device):
             n_word_correct += n_correct
 
     loss_per_word = total_loss/n_word_total
+
+    writer.add_scalar('val_loss', loss_per_word, epoch_idx)
+
     accuracy = n_word_correct/n_word_total
     return loss_per_word, accuracy
 

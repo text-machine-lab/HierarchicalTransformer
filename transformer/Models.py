@@ -86,13 +86,17 @@ class Encoder(nn.Module):
         # -- Forward
         enc_output = self.src_word_emb(src_seq) + self.position_enc(src_pos)
 
+        #TODO change layers to be unet layers here
         for enc_layer in self.layer_stack:
+            #TODO change sizes of each layer with 1d convolution
             enc_output, enc_slf_attn = enc_layer(
                 enc_output,
                 non_pad_mask=non_pad_mask,
                 slf_attn_mask=slf_attn_mask)
             if return_attns:
                 enc_slf_attn_list += [enc_slf_attn]
+
+        #TODO add upsampling layers with 1d deconvolution
 
         if return_attns:
             return enc_output, enc_slf_attn_list
