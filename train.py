@@ -245,6 +245,10 @@ def main():
     opt.cuda = not opt.no_cuda
     opt.d_word_vec = opt.d_model
 
+    # new code to run Tensorboard
+    global writer
+    writer = SummaryWriter('logdir/' + str(datetime.datetime.now()) + ' ' + str(opt))
+
     #========= Loading Dataset =========#
     data = torch.load(opt.data)
     opt.max_token_seq_len = data['settings'].max_token_seq_len
@@ -312,8 +316,6 @@ def prepare_dataloaders(data, opt):
 
 
 if __name__ == '__main__':
-    # new code to run Tensorboard
-    writer = SummaryWriter('logdir/' + str(datetime.datetime.now()))
 
     main()
 
