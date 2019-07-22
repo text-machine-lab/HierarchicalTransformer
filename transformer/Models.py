@@ -3,7 +3,7 @@ import torch
 import torch.nn as nn
 import numpy as np
 import transformer.Constants as Constants
-from transformer.Layers import EncoderLayer, DecoderLayer
+from transformer.Layers import UNetEncoderLayer, EncoderLayer, DecoderLayer
 
 __author__ = "Yu-Hsiang Huang"
 
@@ -63,6 +63,7 @@ class Encoder(nn.Module):
         super().__init__()
 
         n_position = len_max_seq + 1
+        self.n_layers = n_layers
 
         self.src_word_emb = nn.Embedding(
             n_src_vocab, d_word_vec, padding_idx=Constants.PAD)
@@ -73,11 +74,9 @@ class Encoder(nn.Module):
 
         self.layer_stack = nn.ModuleList([
             EncoderLayer(d_model, d_inner, n_head, d_k, d_v, dropout=dropout)
-            for _ in range(n_layers)])
+            for _ in range(self.n_layers)])
 
     def forward(self, src_seq, src_pos, return_attns=False):
-
-        enc_slf_attn_list = []
 
         # -- Prepare masks
         slf_attn_mask = get_attn_key_pad_mask(seq_k=src_seq, seq_q=src_seq)
@@ -86,21 +85,103 @@ class Encoder(nn.Module):
         # -- Forward
         enc_output = self.src_word_emb(src_seq) + self.position_enc(src_pos)
 
-        #TODO change layers to be unet layers here
-        for enc_layer in self.layer_stack:
-            #TODO change sizes of each layer with 1d convolution
-            enc_output, enc_slf_attn = enc_layer(
+        enc_slf_attn_list = []
+        for encoder_layer in self.layer_stack:
+
+            enc_output, enc_slf_attn = encoder_layer(
                 enc_output,
                 non_pad_mask=non_pad_mask,
                 slf_attn_mask=slf_attn_mask)
             if return_attns:
                 enc_slf_attn_list += [enc_slf_attn]
 
-        #TODO add upsampling layers with 1d deconvolution
-
         if return_attns:
             return enc_output, enc_slf_attn_list
         return enc_output,
+
+
+class UNetEncoder(nn.Module):
+    ''' A encoder model with self attention mechanism. '''
+
+    def __init__(
+            self,
+            n_src_vocab, len_max_seq, d_word_vec,
+            n_layers, n_head, d_k, d_v,
+            d_model, d_inner, dropout=0.1):
+
+        super().__init__()
+
+        n_position = len_max_seq + 1
+        self.n_layers = n_layers
+
+        self.src_word_emb = nn.Embedding(
+            n_src_vocab, d_word_vec, padding_idx=Constants.PAD)
+
+        self.position_enc = nn.Embedding.from_pretrained(
+            get_sinusoid_encoding_table(n_position, d_word_vec, padding_idx=0),
+            freeze=True)
+
+        assert n_layers % 2 == 0
+
+        # layers going down to abstract representation
+        self.down_stack = nn.ModuleList([
+            UNetEncoderLayer(d_model, d_inner, n_head, d_k, d_v, dropout=dropout, type='same')
+            for _ in range(n_layers//2)])
+
+        # layers going up to output representation
+        self.up_stack = nn.ModuleList([
+            UNetEncoderLayer(d_model, d_inner, n_head, d_k, d_v, dropout=dropout, type='same')
+            for _ in range(n_layers//2)])
+
+        self.maxpool1d = nn.MaxPool1d(2, stride=2)
+        self.maxpool2d = nn.MaxPool2d(2, stride=2)
+
+
+    def forward(self, src_seq, src_pos, return_attns=False):
+
+        # -- Prepare masks
+        slf_attn_mask = get_attn_key_pad_mask(seq_k=src_seq, seq_q=src_seq)
+        non_pad_mask = get_non_pad_mask(src_seq)
+
+        # -- Forward
+        enc_output = self.src_word_emb(src_seq) + self.position_enc(src_pos)
+
+        #TODO add upsampling layers with 1d deconvolution
+
+        slf_attn_list = []
+        up_outputs = []
+        for layer in self.down_stack:
+            #TODO change sizes of each layer with 1d convolution
+
+            enc_output, enc_slf_attn = layer(
+                enc_output,
+                non_pad_mask=non_pad_mask,
+                slf_attn_mask=slf_attn_mask)
+
+            up_outputs.append(enc_output)
+
+            if return_attns:
+                slf_attn_list += [enc_slf_attn]
+
+        # we align every up layer with the corresponding down layer
+        up_outputs.reverse()
+
+        for layer, up_output in zip(self.up_stack, up_outputs):
+
+            enc_output, enc_slf_attn = layer(
+                enc_output,
+                non_pad_mask=non_pad_mask,
+                slf_attn_mask=slf_attn_mask,
+                ctx_input=up_output)
+
+            if return_attns:
+                slf_attn_list += [enc_slf_attn]
+
+        if return_attns:
+            return enc_output, slf_attn_list
+
+        return enc_output,
+
 
 class Decoder(nn.Module):
     ''' A decoder model with self attention mechanism. '''
@@ -165,11 +246,14 @@ class Transformer(nn.Module):
             d_word_vec=512, d_model=512, d_inner=2048,
             n_layers=6, n_head=8, d_k=64, d_v=64, dropout=0.1,
             tgt_emb_prj_weight_sharing=True,
-            emb_src_tgt_weight_sharing=True):
+            emb_src_tgt_weight_sharing=True, unet=True):
 
         super().__init__()
 
-        self.encoder = Encoder(
+        # this is the major modification of the project
+        encoder_type = Encoder if not unet else UNetEncoder
+
+        self.encoder = encoder_type(
             n_src_vocab=n_src_vocab, len_max_seq=len_max_seq,
             d_word_vec=d_word_vec, d_model=d_model, d_inner=d_inner,
             n_layers=n_layers, n_head=n_head, d_k=d_k, d_v=d_v,
