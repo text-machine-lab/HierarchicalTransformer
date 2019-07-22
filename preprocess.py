@@ -65,6 +65,10 @@ def convert_instance_to_idx_seq(word_insts, word2idx):
     ''' Mapping words to idx sequence. '''
     return [[word2idx.get(w, Constants.UNK) for w in s] for s in word_insts]
 
+def convert_idx_seq_to_instance(idx_seq, idx2word):
+    pred_line = ' '.join([idx2word[idx] for idx in idx_seq])
+    return pred_line
+
 def main():
     ''' Main function '''
 
@@ -155,6 +159,29 @@ def main():
         'valid': {
             'src': valid_src_insts,
             'tgt': valid_tgt_insts}}
+
+    #TODO here we print out examples from training and validation sets
+
+    src_idx2word = {idx: word for word, idx in src_word2idx.items()}
+    tgt_idx2word = {idx: word for word, idx in tgt_word2idx.items()}
+
+    # print training examples
+    print('### Training examples ###\n')
+    for i in range(5):
+        history = convert_idx_seq_to_instance(train_src_insts[i], src_idx2word)
+        response = convert_idx_seq_to_instance(train_tgt_insts[i], tgt_idx2word)
+        print('History: %s' % history)
+        print('Response: %s' % response)
+    print()
+
+    # print training examples
+    print('### Validation examples ###\n')
+    for i in range(5):
+        history = convert_idx_seq_to_instance(valid_src_insts[i], src_idx2word)
+        response = convert_idx_seq_to_instance(valid_tgt_insts[i], tgt_idx2word)
+        print('History: %s' % history)
+        print('Response: %s' % response)
+    print()
 
     print('[Info] Dumping the processed data to pickle file', opt.save_data)
     torch.save(data, opt.save_data)
