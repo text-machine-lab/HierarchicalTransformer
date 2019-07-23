@@ -52,7 +52,6 @@ class MultiHeadAttention(nn.Module):
 
         mask = mask.repeat(n_head, 1, 1) # (n*b) x .. x ..
         output, attn = self.attention(q, k, v, mask=mask)
-
         output = output.view(n_head, sz_b, len_q, d_v)
         output = output.permute(1, 2, 0, 3).contiguous().view(sz_b, len_q, -1) # b x lq x (n*dv)
 

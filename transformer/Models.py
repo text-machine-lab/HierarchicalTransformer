@@ -140,38 +140,70 @@ class UNetEncoder(nn.Module):
     def forward(self, src_seq, src_pos, return_attns=False):
 
         # -- Prepare masks
-        slf_attn_mask = get_attn_key_pad_mask(seq_k=src_seq, seq_q=src_seq)
-        non_pad_mask = get_non_pad_mask(src_seq)
+        #slf_attn_mask = get_attn_key_pad_mask(seq_k=src_seq, seq_q=src_seq)  # b x l
+        non_pad_mask = get_non_pad_mask(src_seq)  # b x lq x lk
 
         # -- Forward
         enc_output = self.src_word_emb(src_seq) + self.position_enc(src_pos)
 
         #TODO add upsampling layers with 1d deconvolution
 
+        # start with bit representation of padding tokens (non_pad_mask)
+
         slf_attn_list = []
         up_outputs = []
+
+        prev_layer_non_pad = non_pad_mask
+        layer_non_pad = non_pad_mask
+
+        layer_pairs = []
+
         for layer in self.down_stack:
             #TODO change sizes of each layer with 1d convolution
 
+            # compute slf_attn_mask from pad specifications for current and previous layer
+            len_q = layer_non_pad.size(1)
+            padding_mask = (1 - prev_layer_non_pad).squeeze(2).byte()
+            padding_mask = padding_mask.unsqueeze(1).expand(-1, len_q, -1)  # b x lq x lk
+
             enc_output, enc_slf_attn = layer(
                 enc_output,
-                non_pad_mask=non_pad_mask,
-                slf_attn_mask=slf_attn_mask)
+                non_pad_mask=layer_non_pad,
+                slf_attn_mask=padding_mask)
+
+            # compute pad specification for next layer from maxpool 1d
+
+            #prev_layer_non_pad = layer_non_pad  # b x lq
+            #layer_non_pad = self.maxpool1d(layer_non_pad.transpose(1, 2)).squeeze(1).unsqueeze(2)
+
+            # store transposed attention masks for unet decoder
 
             up_outputs.append(enc_output)
+            layer_pairs.append((prev_layer_non_pad, layer_non_pad))
 
             if return_attns:
                 slf_attn_list += [enc_slf_attn]
 
         # we align every up layer with the corresponding down layer
         up_outputs.reverse()
+        layer_pairs.reverse()
 
-        for layer, up_output in zip(self.up_stack, up_outputs):
+        # decoder uses computed attention masks from unet encoder
+
+        for layer, up_output, pair in zip(self.up_stack, up_outputs, layer_pairs):
+
+            # reverse ordering, since we are upsampling now instead of down
+            layer_non_pad, prev_layer_non_pad = pair
+
+            # compute slf_attn_mask from pad specifications for current and previous layer
+            len_q = layer_non_pad.size(1)
+            padding_mask = (1 - prev_layer_non_pad).squeeze(2).byte()
+            padding_mask = padding_mask.unsqueeze(1).expand(-1, len_q, -1)  # b x lq x lk
 
             enc_output, enc_slf_attn = layer(
                 enc_output,
-                non_pad_mask=non_pad_mask,
-                slf_attn_mask=slf_attn_mask,
+                non_pad_mask=layer_non_pad,
+                slf_attn_mask=padding_mask,
                 ctx_input=up_output)
 
             if return_attns:
