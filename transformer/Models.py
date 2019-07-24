@@ -121,17 +121,22 @@ class UNetEncoder(nn.Module):
             get_sinusoid_encoding_table(n_position, d_word_vec, padding_idx=0),
             freeze=True)
 
-        assert n_layers % 2 == 0
+        assert n_layers % 2 == 0  # we have equal up layers as down layers
+
+        self.in_layer = UNetEncoderLayer(d_model, d_inner, n_head, d_k, d_v, dropout=dropout, type='same')
+        self.out_layer = UNetEncoderLayer(d_model, d_inner, n_head, d_k, d_v, dropout=dropout, type='same')
+
+        depth = n_layers // 2 - 1
 
         # layers going down to abstract representation
         self.down_stack = nn.ModuleList([
             UNetEncoderLayer(d_model, d_inner, n_head, d_k, d_v, dropout=dropout, type='down')
-            for _ in range(n_layers//2)])
+            for _ in range(depth)])
 
         # layers going up to output representation
         self.up_stack = nn.ModuleList([
             UNetEncoderLayer(d_model, d_inner, n_head, d_k, d_v, dropout=dropout, type='up')
-            for _ in range(n_layers//2)])
+            for _ in range(depth)])
 
         self.maxpool1d = nn.MaxPool1d(3, stride=2, padding=1)
 
@@ -139,25 +144,35 @@ class UNetEncoder(nn.Module):
     def forward(self, src_seq, src_pos, return_attns=False):
 
         # -- Prepare masks
-        #slf_attn_mask = get_attn_key_pad_mask(seq_k=src_seq, seq_q=src_seq)  # b x l
+        slf_attn_mask = get_attn_key_pad_mask(seq_k=src_seq, seq_q=src_seq)  # b x l
         non_pad_mask = get_non_pad_mask(src_seq)  # b x lq x lk
 
         # -- Forward
         enc_output = self.src_word_emb(src_seq) + self.position_enc(src_pos)
-
-        #TODO add upsampling layers with 1d deconvolution
 
         # start with bit representation of padding tokens (non_pad_mask)
 
         slf_attn_list = []
         up_outputs = []
 
+        ######### INPUT LAYER ###########
+
+        enc_output, enc_slf_attn = self.in_layer(
+            enc_output,
+            non_pad_mask=non_pad_mask,
+            slf_attn_mask=slf_attn_mask
+        )
+
+        first_output = enc_output
+
+        if return_attns:
+            slf_attn_list.append(enc_slf_attn)
+
+        ######### DOWN LAYERS ##########
+
         layer_non_pad = non_pad_mask
-
         layer_pairs = []
-
         for layer in self.down_stack:
-            #TODO change sizes of each layer with 1d convolution
 
             prev_layer_non_pad = layer_non_pad  # b x lq
             layer_non_pad = self.maxpool1d(layer_non_pad.transpose(1, 2)).squeeze(1).unsqueeze(2)
@@ -191,6 +206,8 @@ class UNetEncoder(nn.Module):
 
         # decoder uses computed attention masks from unet encoder
 
+        ####### UP LAYERS #############
+
         for layer, up_output, pair in zip(self.up_stack, up_outputs, layer_pairs):
 
             # reverse ordering, since we are upsampling now instead of down
@@ -210,9 +227,20 @@ class UNetEncoder(nn.Module):
             if return_attns:
                 slf_attn_list += [enc_slf_attn]
 
+        ######## OUTPUT LAYER #############
+
+        enc_output, enc_slf_attn = self.in_layer(
+            enc_output,
+            non_pad_mask=non_pad_mask,
+            slf_attn_mask=slf_attn_mask,
+            ctx_input=first_output
+        )
+
+        if return_attns:
+            slf_attn_list.append(enc_slf_attn)
+
         if return_attns:
             return enc_output, slf_attn_list
-
         return enc_output,
 
 
