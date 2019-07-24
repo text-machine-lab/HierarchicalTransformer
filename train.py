@@ -240,6 +240,7 @@ def main():
 
     parser.add_argument('-no_cuda', action='store_true')
     parser.add_argument('-label_smoothing', action='store_true')
+    parser.add_argument('-unet', action='store_true')
 
     opt = parser.parse_args()
     opt.cuda = not opt.no_cuda
@@ -279,7 +280,8 @@ def main():
         d_inner=opt.d_inner_hid,
         n_layers=opt.n_layers,
         n_head=opt.n_head,
-        dropout=opt.dropout).to(device)
+        dropout=opt.dropout,
+        unet=opt.unet).to(device)
 
     optimizer = ScheduledOptim(
         optim.Adam(

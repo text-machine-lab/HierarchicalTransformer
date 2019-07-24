@@ -65,26 +65,26 @@ class UNetEncoderLayer(nn.Module):
         conv_output = conv_input.transpose(1, 2)  # (batch_size, emb_size, n_steps)
 
         if self.type != 'up':
-            conv_output = self.conv(conv_output).transpose(1, 2)
+            conv_output = self.conv(conv_output)
         else:
-            # we are doing a transpose
+            # we are doing a transpose - we need to specify output size in order to recover the correct size
             output_size = None if non_pad_mask is None else \
                 (non_pad_mask.shape[0], conv_input.shape[2], non_pad_mask.shape[1])
 
-            conv_output = self.conv(conv_output, output_size=output_size).transpose(1, 2)
+            conv_output = self.conv(conv_output, output_size=output_size)
+
+        conv_output = conv_output.transpose(1, 2)  # (batch_size, n_steps, emb_size)
 
         # if same, we use skip connections from input to output to allow for more efficient gradient propagation
-        if self.type == 'same':
-            conv_output = self.norm(enc_input + conv_output)
-        else:
-            conv_output = self.norm(conv_output)
+        norm_input = conv_input + conv_output if self.type == 'same' else conv_output
+
+        norm_output = self.norm(norm_input)
 
         # here the output of the convolution performs attention over the input
         enc_output, enc_slf_attn = self.slf_attn(
-            conv_output, conv_input, conv_input, mask=slf_attn_mask)
+            norm_output, conv_input, conv_input, mask=slf_attn_mask)
 
         enc_output *= non_pad_mask
-
         enc_output = self.pos_ffn(enc_output)
         enc_output *= non_pad_mask
 
