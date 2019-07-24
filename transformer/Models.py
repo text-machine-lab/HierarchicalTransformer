@@ -125,16 +125,15 @@ class UNetEncoder(nn.Module):
 
         # layers going down to abstract representation
         self.down_stack = nn.ModuleList([
-            UNetEncoderLayer(d_model, d_inner, n_head, d_k, d_v, dropout=dropout, type='same')
+            UNetEncoderLayer(d_model, d_inner, n_head, d_k, d_v, dropout=dropout, type='down')
             for _ in range(n_layers//2)])
 
         # layers going up to output representation
         self.up_stack = nn.ModuleList([
-            UNetEncoderLayer(d_model, d_inner, n_head, d_k, d_v, dropout=dropout, type='same')
+            UNetEncoderLayer(d_model, d_inner, n_head, d_k, d_v, dropout=dropout, type='up')
             for _ in range(n_layers//2)])
 
-        self.maxpool1d = nn.MaxPool1d(2, stride=2)
-        self.maxpool2d = nn.MaxPool2d(2, stride=2)
+        self.maxpool1d = nn.MaxPool1d(3, stride=2, padding=1)
 
 
     def forward(self, src_seq, src_pos, return_attns=False):
@@ -153,13 +152,15 @@ class UNetEncoder(nn.Module):
         slf_attn_list = []
         up_outputs = []
 
-        prev_layer_non_pad = non_pad_mask
         layer_non_pad = non_pad_mask
 
         layer_pairs = []
 
         for layer in self.down_stack:
             #TODO change sizes of each layer with 1d convolution
+
+            prev_layer_non_pad = layer_non_pad  # b x lq
+            layer_non_pad = self.maxpool1d(layer_non_pad.transpose(1, 2)).squeeze(1).unsqueeze(2)
 
             # compute slf_attn_mask from pad specifications for current and previous layer
             len_q = layer_non_pad.size(1)
@@ -171,10 +172,7 @@ class UNetEncoder(nn.Module):
                 non_pad_mask=layer_non_pad,
                 slf_attn_mask=padding_mask)
 
-            # compute pad specification for next layer from maxpool 1d
-
-            #prev_layer_non_pad = layer_non_pad  # b x lq
-            #layer_non_pad = self.maxpool1d(layer_non_pad.transpose(1, 2)).squeeze(1).unsqueeze(2)
+            # compute pad specification for next layer from maxpool 1
 
             # store transposed attention masks for unet decoder
 
@@ -187,6 +185,9 @@ class UNetEncoder(nn.Module):
         # we align every up layer with the corresponding down layer
         up_outputs.reverse()
         layer_pairs.reverse()
+
+        enc_output = None  # the first layer of the decoder will not receive input from another decoder layer
+        # otherwise, it wouldn't be the first layer
 
         # decoder uses computed attention masks from unet encoder
 
