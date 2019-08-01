@@ -9,24 +9,32 @@ __author__ = "Yu-Hsiang Huang"
 class MultiHeadAttention(nn.Module):
     ''' Multi-Head Attention module '''
 
-    def __init__(self, n_head, d_model, d_k, d_v, dropout=0.1):
+    def __init__(self, n_head, d_out, d_k, d_v, dropout=0.1):
+        """
+
+        :param n_head: number of attention heads
+        :param d_out: size of output of multi head attention, same as query input q
+        :param d_k: dimension of keys during attention
+        :param d_v: dimension of values during attention
+        :param dropout: regularization constant
+        """
         super().__init__()
 
         self.n_head = n_head
         self.d_k = d_k
         self.d_v = d_v
 
-        self.w_qs = nn.Linear(d_model, n_head * d_k)
-        self.w_ks = nn.Linear(d_model, n_head * d_k)
-        self.w_vs = nn.Linear(d_model, n_head * d_v)
-        nn.init.normal_(self.w_qs.weight, mean=0, std=np.sqrt(2.0 / (d_model + d_k)))
-        nn.init.normal_(self.w_ks.weight, mean=0, std=np.sqrt(2.0 / (d_model + d_k)))
-        nn.init.normal_(self.w_vs.weight, mean=0, std=np.sqrt(2.0 / (d_model + d_v)))
+        self.w_qs = nn.Linear(d_out, n_head * d_k)
+        self.w_ks = nn.Linear(d_out, n_head * d_k)
+        self.w_vs = nn.Linear(d_out, n_head * d_v)
+        nn.init.normal_(self.w_qs.weight, mean=0, std=np.sqrt(2.0 / (d_out + d_k)))
+        nn.init.normal_(self.w_ks.weight, mean=0, std=np.sqrt(2.0 / (d_out + d_k)))
+        nn.init.normal_(self.w_vs.weight, mean=0, std=np.sqrt(2.0 / (d_out + d_v)))
 
         self.attention = ScaledDotProductAttention(temperature=np.power(d_k, 0.5))
-        self.layer_norm = nn.LayerNorm(d_model)
+        self.layer_norm = nn.LayerNorm(d_out)
 
-        self.fc = nn.Linear(n_head * d_v, d_model)
+        self.fc = nn.Linear(n_head * d_v, d_out)
         nn.init.xavier_normal_(self.fc.weight)
 
         self.dropout = nn.Dropout(dropout)

@@ -219,10 +219,9 @@ class UNetEncoder(nn.Module):
             padding_mask = padding_mask.unsqueeze(1).expand(-1, len_q, -1)  # b x lq x lk
 
             enc_output, enc_slf_attn = layer(
-                enc_output,
+                enc_output + up_output,  # HERE WE ADD OUTPUT OF PREVIOUS LAYER WITH SKIP CONNECTION FROM DOWN LAYER
                 non_pad_mask=layer_non_pad,
-                slf_attn_mask=padding_mask,
-                ctx_input=up_output)
+                slf_attn_mask=padding_mask)
 
             if return_attns:
                 slf_attn_list += [enc_slf_attn]
@@ -230,11 +229,9 @@ class UNetEncoder(nn.Module):
         ######## OUTPUT LAYER #############
 
         enc_output, enc_slf_attn = self.in_layer(
-            enc_output,
+            enc_output + first_output,  # HERE WE ADD FIRST DOWN LAYER OUTPUT FOR FINAL PREDICTION
             non_pad_mask=non_pad_mask,
-            slf_attn_mask=slf_attn_mask,
-            ctx_input=first_output
-        )
+            slf_attn_mask=slf_attn_mask,)
 
         if return_attns:
             slf_attn_list.append(enc_slf_attn)
