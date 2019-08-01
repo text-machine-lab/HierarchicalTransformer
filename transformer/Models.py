@@ -1,5 +1,6 @@
 ''' Define the Transformer model '''
 import torch
+from math import sqrt
 import torch.nn as nn
 import numpy as np
 import transformer.Constants as Constants
@@ -128,15 +129,22 @@ class UNetEncoder(nn.Module):
 
         depth = n_layers // 2 - 1
 
+        # each layer increases in size by the sqrt of 2 to keep computation relatively constant
+        layer_sizes = [round(d_model * sqrt(2) ** i) for i in range(depth + 1)]  # [d_model for _ in range(depth+1)]  #
+
         # layers going down to abstract representation
         self.down_stack = nn.ModuleList([
-            UNetEncoderLayer(d_model, d_inner, n_head, d_k, d_v, dropout=dropout, type='down')
-            for _ in range(depth)])
+            UNetEncoderLayer(layer_sizes[i+1], d_inner, n_head, d_k, d_v, dropout=dropout,
+                             type='down', d_in=layer_sizes[i])
+            for i in range(depth)])
+
+        layer_sizes.reverse()
 
         # layers going up to output representation
         self.up_stack = nn.ModuleList([
-            UNetEncoderLayer(d_model, d_inner, n_head, d_k, d_v, dropout=dropout, type='up')
-            for _ in range(depth)])
+            UNetEncoderLayer(layer_sizes[i+1], d_inner, n_head, d_k, d_v, dropout=dropout,
+                             type='up', d_in=layer_sizes[i])
+            for i in range(depth)])
 
         self.maxpool1d = nn.MaxPool1d(3, stride=2, padding=1)
 
@@ -218,8 +226,11 @@ class UNetEncoder(nn.Module):
             padding_mask = (1 - prev_layer_non_pad).squeeze(2).byte()
             padding_mask = padding_mask.unsqueeze(1).expand(-1, len_q, -1)  # b x lq x lk
 
+            # if not first decoder layer, we add input of previous layer with skip connection to respective down layer
+            layer_input = enc_output + up_output if enc_output is not None else up_output
+
             enc_output, enc_slf_attn = layer(
-                enc_output + up_output,  # HERE WE ADD OUTPUT OF PREVIOUS LAYER WITH SKIP CONNECTION FROM DOWN LAYER
+                layer_input,  # HERE WE ADD OUTPUT OF PREVIOUS LAYER WITH SKIP CONNECTION FROM DOWN LAYER
                 non_pad_mask=layer_non_pad,
                 slf_attn_mask=padding_mask)
 

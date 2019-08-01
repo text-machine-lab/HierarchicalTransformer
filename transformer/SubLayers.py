@@ -9,7 +9,7 @@ __author__ = "Yu-Hsiang Huang"
 class MultiHeadAttention(nn.Module):
     ''' Multi-Head Attention module '''
 
-    def __init__(self, n_head, d_out, d_k, d_v, dropout=0.1):
+    def __init__(self, n_head, d_out, d_k, d_v, dropout=0.1, d_in=None):
         """
 
         :param n_head: number of attention heads
@@ -20,16 +20,17 @@ class MultiHeadAttention(nn.Module):
         """
         super().__init__()
 
+        d_in = d_in if d_in is not None else d_out
         self.n_head = n_head
         self.d_k = d_k
         self.d_v = d_v
 
         self.w_qs = nn.Linear(d_out, n_head * d_k)
-        self.w_ks = nn.Linear(d_out, n_head * d_k)
-        self.w_vs = nn.Linear(d_out, n_head * d_v)
+        self.w_ks = nn.Linear(d_in, n_head * d_k)
+        self.w_vs = nn.Linear(d_in, n_head * d_v)
         nn.init.normal_(self.w_qs.weight, mean=0, std=np.sqrt(2.0 / (d_out + d_k)))
-        nn.init.normal_(self.w_ks.weight, mean=0, std=np.sqrt(2.0 / (d_out + d_k)))
-        nn.init.normal_(self.w_vs.weight, mean=0, std=np.sqrt(2.0 / (d_out + d_v)))
+        nn.init.normal_(self.w_ks.weight, mean=0, std=np.sqrt(2.0 / (d_in + d_k)))
+        nn.init.normal_(self.w_vs.weight, mean=0, std=np.sqrt(2.0 / (d_in + d_v)))
 
         self.attention = ScaledDotProductAttention(temperature=np.power(d_k, 0.5))
         self.layer_norm = nn.LayerNorm(d_out)
