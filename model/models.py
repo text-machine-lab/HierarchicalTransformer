@@ -3,11 +3,48 @@ import torch.nn as nn
 from utils import to_var, pad, normal_kl_div, normal_logpdf, bag_of_words_loss, to_bow, EOS_ID
 import layers
 import numpy as np
+import sys
+sys.path.append('..') # ASSUMPTION - THIS MODULE LIES IN DIR NEXT TO TRANSFORMER DIR
 import random
+from transformer.Models import Transformer
 
 VariationalModels = ['VHRED', 'VHCR']
 
 #TODO insert Transformer model here
+
+
+class TRANSFORMER(nn.Module):
+    def __init__(self, config):
+        super(TRANSFORMER, self).__init__()
+        self.config = config
+        self.transformer = Transformer(config.vocab_size, config.vocab_size, config.max_convo_len, config.encoder_hidden_size,
+                                       config.encoder_hidden_size, config.encoder_hidden_size * 4, unet=False)  #TODO add unet
+
+    def forward(self, input_sentences, input_sentence_length,
+                input_conversation_length, target_sentences, decode=False):
+        """
+        Args:
+            input_sentences: (Variable, LongTensor) [num_sentences, seq_len]
+            target_sentences: (Variable, LongTensor) [num_sentences, seq_len]
+        Return:
+            decoder_outputs: (Variable, FloatTensor)
+                - train: [batch_size, seq_len, vocab_size]
+                - eval: [batch_size, seq_len]
+        """
+
+        # Game Plan: Unravel input conversations and prune to max_convo_len
+        # Run Run through Transformer to produce output logits
+        raise NotImplementedError("Transformer is not yet implemented")
+
+        # if not decode:
+        #     return None
+        # else:
+        #     raise NotImplementedError("We can't do beam decoding yet")
+
+    def generate(self, context, sentence_length, n_context):
+        #TODO allow generation from Transformer
+        return 0.0
+
 
 class HRED(nn.Module):
     def __init__(self, config):
@@ -83,8 +120,6 @@ class HRED(nn.Module):
         encoder_hidden = torch.stack([pad(encoder_hidden.narrow(0, s, l), max_len)
                                       for s, l in zip(start.data.tolist(),
                                                       input_conversation_length.data.tolist())], 0)
-
-        import pdb; pdb.set_trace()
 
         # context_outputs: [batch_size, max_len, context_size]
         context_outputs, context_last_hidden = self.context_encoder(encoder_hidden,

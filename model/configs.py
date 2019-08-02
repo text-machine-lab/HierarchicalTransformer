@@ -95,6 +95,7 @@ def get_config(parse=True, **optional_kwargs):
 
     # Generation
     parser.add_argument('--max_unroll', type=int, default=30)
+    parser.add_argument('--max_convo_len', type=int, default=9)  # ONLY USED FOR TRANSFORMER!!!
     parser.add_argument('--sample', type=str2bool, default=False,
                         help='if false, use beam search for decoding')
     parser.add_argument('--temperature', type=float, default=1.0)
