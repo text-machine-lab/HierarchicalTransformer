@@ -7,6 +7,8 @@ import random
 
 VariationalModels = ['VHRED', 'VHCR']
 
+#TODO insert Transformer model here
+
 class HRED(nn.Module):
     def __init__(self, config):
         super(HRED, self).__init__()
@@ -71,6 +73,8 @@ class HRED(nn.Module):
         # encoder_hidden: [num_sentences, num_layers * direction * hidden_size]
         encoder_hidden = encoder_hidden.transpose(1, 0).contiguous().view(num_sentences, -1)
 
+        #TODO use the following two lines to format the data for input to Transformer
+
         # pad and pack encoder_hidden
         start = torch.cumsum(torch.cat((to_var(input_conversation_length.data.new(1).zero_()),
                                         input_conversation_length[:-1])), 0)
@@ -79,6 +83,8 @@ class HRED(nn.Module):
         encoder_hidden = torch.stack([pad(encoder_hidden.narrow(0, s, l), max_len)
                                       for s, l in zip(start.data.tolist(),
                                                       input_conversation_length.data.tolist())], 0)
+
+        import pdb; pdb.set_trace()
 
         # context_outputs: [batch_size, max_len, context_size]
         context_outputs, context_last_hidden = self.context_encoder(encoder_hidden,
