@@ -130,11 +130,14 @@ class UNetEncoder(nn.Module):
         depth = n_layers // 2 - 1
 
         # each layer increases in size by the sqrt of 2 to keep computation relatively constant
-        layer_sizes = [round(d_model * sqrt(2) ** i) for i in range(depth + 1)]  # [d_model for _ in range(depth+1)]  #
+        multiples = [sqrt(2) ** i for i in range(depth + 1)]
+        layer_sizes = [round(d_model * multiples[i]) for i in range(depth + 1)]  # [d_model for _ in range(depth+1)]  #
+        d_k_sizes = [round(d_k * multiples[i+1]) for i in range(depth)]
+        d_v_sizes = [round(d_v * multiples[i+1]) for i in range(depth)]
 
         # layers going down to abstract representation
         self.down_stack = nn.ModuleList([
-            UNetEncoderLayer(layer_sizes[i+1], d_inner, n_head, d_k, d_v, dropout=dropout,
+            UNetEncoderLayer(layer_sizes[i+1], d_inner, n_head, d_k_sizes[i], d_v_sizes[i], dropout=dropout,
                              type='down', d_in=layer_sizes[i])
             for i in range(depth)])
 
