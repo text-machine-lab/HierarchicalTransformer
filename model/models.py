@@ -20,20 +20,34 @@ class TRANSFORMER(nn.Module):
         self.transformer = Transformer(config.vocab_size, config.vocab_size, config.max_convo_len, config.encoder_hidden_size,
                                        config.encoder_hidden_size, config.encoder_hidden_size * 4, unet=False)  #TODO add unet
 
-    def forward(self, input_sentences, input_sentence_length,
-                input_conversation_length, target_sentences, decode=False):
+    def forward(self, histories, responses, decode=False):
         """
         Args:
-            input_sentences: (Variable, LongTensor) [num_sentences, seq_len]
-            target_sentences: (Variable, LongTensor) [num_sentences, seq_len]
+            histories: (LongTensor) [batch_size, convo_len, seq_len]
+            responses: (LongTensor) [batch_size, seq_len]
         Return:
-            decoder_outputs: (Variable, FloatTensor)
+            decoder_outputs: (FloatTensor)
                 - train: [batch_size, seq_len, vocab_size]
                 - eval: [batch_size, seq_len]
         """
 
-        # Game Plan: Unravel input conversations and prune to max_convo_len
-        # Run Run through Transformer to produce output logits
+        # Game Plan: Given a conversation, train on each (history, response) pair separately. This may be slower.
+        # Predict batch response given history. Vector is pruned to number of utterances equal to the longest conversation,
+        # guaranteeing that every prediction will have at least one utterance to predict to avoid overflow.
+
+        # 1.) Receive padded history and response as input
+        # 2.) Run Transformer on this input
+        # 3.) Return logits for response only
+        # 4.) Evaluate loss and backpropagate for each response in conversation
+
+        import pdb; pdb.set_trace()
+
+        batch_pos = np.array([
+            [pos_i + 1 if w_i != Constants.PAD else 0
+             for pos_i, w_i in enumerate(inst)] for inst in batch_seq])
+
+        logits = self.transformer(histories, responses)
+
         raise NotImplementedError("Transformer is not yet implemented")
 
         # if not decode:

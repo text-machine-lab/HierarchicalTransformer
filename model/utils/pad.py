@@ -3,6 +3,16 @@ from torch.autograd import Variable
 from .convert import to_var
 
 
+def push_zeros_right(x):
+    y = torch.empty(0, x.size(1)).long()
+    for r in x:
+        nz = r.nonzero().squeeze()
+        z = torch.zeros(r.numel() - nz.numel()).long()
+        z = torch.cat((r[nz], z)).unsqueeze(0)
+        y = torch.cat((y, z))
+    return y
+
+
 def pad(tensor, length):
     if isinstance(tensor, Variable):
         var = tensor
