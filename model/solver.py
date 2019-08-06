@@ -2,10 +2,11 @@ from itertools import cycle
 import numpy as np
 import torch
 import torch.nn as nn
+import torch.nn.functional as F
 import models
 from layers import masked_cross_entropy
 from utils import to_var, time_desc_decorator, TensorboardWriter, pad_and_pack, normal_kl_div, to_bow, bag_of_words_loss, \
-    normal_kl_div, embedding_metric, push_zeros_right
+    normal_kl_div, embedding_metric, push_zeros_right, SOS_ID
 import os
 from tqdm import tqdm
 from math import isnan
@@ -146,7 +147,7 @@ class Solver(object):
 
                     conversations_pad = [[empty] * (max_convo_len - len(convo)) + convo for convo in conversations]
 
-                    t_convos = torch.LongTensor(conversations_pad)
+                    t_convos = to_var(torch.LongTensor(conversations_pad))
                     # We prune conversations to maximum allowed conversation length
                     #t_convos = t_convos[:, -self.config.max_convo_len:, :]
                     t_sent_lens = torch.sum((t_convos != 0).long(), 2)
@@ -155,7 +156,7 @@ class Solver(object):
 
                     #assert (t_convo_lens == torch.LongTensor(conversation_length)).all()
 
-                    #TODO problem where batches are not i.i.d
+                    #TODO it's a problem that batches are not i.i.d
 
                     # here we generate each response separately and perform separate updates
                     response_losses = []
@@ -166,19 +167,34 @@ class Solver(object):
                         # gather flattened conversation history
                         histories = t_convos[:, :r_idx, :]
                         histories = histories.view(histories.shape[0], -1)
-                        histories = push_zeros_right(histories)
+                        histories = push_zeros_right(histories)  # move all utterance words to beginning of vector
 
-                        # pad/prune history length to max_convo_len * max_unroll
+                        #TODO make sure padding works with u-net transformer
 
+                        max_tokens = max_convo_len * self.config.max_unroll
+                        # num_pad = max_tokens - histories.shape[1]
+                        #histories = F.pad(histories, [0, num_pad])
+                        histories = histories[:, :max_tokens]
 
-                        responses = t_convos[:, r_idx, :]
+                        responses = t_convos[:, r_idx, :].contiguous()
+
+                        histories = to_var(histories)
+                        responses = to_var(responses)
 
                         self.optimizer.zero_grad()
 
+                        sos_id = torch.tensor(SOS_ID).to(responses.device).view(1, 1).expand(responses.shape[0], -1)
+
+                        gold = torch.cat([sos_id, responses], 1)
+
                         sentence_logits = self.model(
                             histories,
-                            responses,
+                            gold,
                             decode=False)
+
+                        import pdb; pdb.set_trace()
+
+                        #TODO realign history so that there is no history with all zeros, this causes nan
 
                         response_loss, n_words = masked_cross_entropy(
                             sentence_logits,
@@ -196,8 +212,6 @@ class Solver(object):
 
                         # Run optimizer
                         self.optimizer.step()
-
-
 
                     # calculate the batch loss and word count across all responses
                     batch_loss = torch.sum(response_losses)

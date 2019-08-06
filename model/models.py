@@ -1,6 +1,6 @@
 import torch
 import torch.nn as nn
-from utils import to_var, pad, normal_kl_div, normal_logpdf, bag_of_words_loss, to_bow, EOS_ID
+from utils import to_var, pad, normal_kl_div, normal_logpdf, bag_of_words_loss, to_bow, EOS_ID, calc_pos
 import layers
 import numpy as np
 import sys
@@ -17,7 +17,7 @@ class TRANSFORMER(nn.Module):
     def __init__(self, config):
         super(TRANSFORMER, self).__init__()
         self.config = config
-        self.transformer = Transformer(config.vocab_size, config.vocab_size, config.max_convo_len, config.encoder_hidden_size,
+        self.transformer = Transformer(config.vocab_size, config.vocab_size, config.max_convo_len * config.max_unroll, config.encoder_hidden_size,
                                        config.encoder_hidden_size, config.encoder_hidden_size * 4, unet=False)  #TODO add unet
 
     def forward(self, histories, responses, decode=False):
@@ -40,20 +40,21 @@ class TRANSFORMER(nn.Module):
         # 3.) Return logits for response only
         # 4.) Evaluate loss and backpropagate for each response in conversation
 
-        import pdb; pdb.set_trace()
+        #TODO run Transformer on conversation history to produce response logits
 
-        batch_pos = np.array([
-            [pos_i + 1 if w_i != Constants.PAD else 0
-             for pos_i, w_i in enumerate(inst)] for inst in batch_seq])
+        # calculate position vectors to locate each token
+        # padding tokens set to zero
+        history_pos = calc_pos(histories)
+        response_pos = calc_pos(responses)
 
-        logits = self.transformer(histories, responses)
+        logits = self.transformer(histories, history_pos, responses, response_pos, flat_logits=False)
 
-        raise NotImplementedError("Transformer is not yet implemented")
+        print(logits.shape)
 
-        # if not decode:
-        #     return None
-        # else:
-        #     raise NotImplementedError("We can't do beam decoding yet")
+        if not decode:
+            return logits
+        else:
+            raise NotImplementedError("We can't do beam decoding yet")
 
     def generate(self, context, sentence_length, n_context):
         #TODO allow generation from Transformer

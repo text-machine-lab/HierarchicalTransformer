@@ -3,11 +3,20 @@ from torch.autograd import Variable
 from .convert import to_var
 
 
+def calc_pos(x):
+    """input x of shape (batch_size, seq_len). Output Tensor same shape with positions
+    1 to seq_len where padding tokens set to zero."""
+    a = torch.arange(1, x.shape[1] + 1).unsqueeze(0).to(x.device)
+    p = a.expand(x.shape[0], -1)
+    mask = (x != 0).long()
+    return p * mask
+
+
 def push_zeros_right(x):
-    y = torch.empty(0, x.size(1)).long()
+    y = torch.empty(0, x.size(1)).long().to(x.device)
     for r in x:
         nz = r.nonzero().squeeze()
-        z = torch.zeros(r.numel() - nz.numel()).long()
+        z = torch.zeros(r.numel() - nz.numel()).long().to(x.device)
         z = torch.cat((r[nz], z)).unsqueeze(0)
         y = torch.cat((y, z))
     return y

@@ -3,6 +3,7 @@ import torch
 from math import sqrt
 import torch.nn as nn
 import numpy as np
+import time
 import transformer.Constants as Constants
 from transformer.Layers import UNetEncoderLayer, EncoderLayer, DecoderLayer
 
@@ -85,10 +86,8 @@ class Encoder(nn.Module):
 
         # -- Forward
         enc_output = self.src_word_emb(src_seq) + self.position_enc(src_pos)
-
         enc_slf_attn_list = []
         for encoder_layer in self.layer_stack:
-
             enc_output, enc_slf_attn = encoder_layer(
                 enc_output,
                 non_pad_mask=non_pad_mask,
@@ -357,12 +356,15 @@ class Transformer(nn.Module):
             "To share word embedding table, the vocabulary size of src/tgt shall be the same."
             self.encoder.src_word_emb.weight = self.decoder.tgt_word_emb.weight
 
-    def forward(self, src_seq, src_pos, tgt_seq, tgt_pos):
-
+    def forward(self, src_seq, src_pos, tgt_seq, tgt_pos, flat_logits=True):
         tgt_seq, tgt_pos = tgt_seq[:, :-1], tgt_pos[:, :-1]
 
         enc_output, *_ = self.encoder(src_seq, src_pos)
+        import pdb; pdb.set_trace()
         dec_output, *_ = self.decoder(tgt_seq, tgt_pos, src_seq, enc_output)
         seq_logit = self.tgt_word_prj(dec_output) * self.x_logit_scale
 
-        return seq_logit.view(-1, seq_logit.size(2))
+        if flat_logits:
+            return seq_logit.view(-1, seq_logit.size(2))
+        else:
+            return seq_logit
