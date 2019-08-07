@@ -2,6 +2,7 @@
 import torch
 from math import sqrt
 import torch.nn as nn
+import torch.nn.functional as F
 import numpy as np
 import time
 import transformer.Constants as Constants
@@ -86,6 +87,7 @@ class Encoder(nn.Module):
 
         # -- Forward
         enc_output = self.src_word_emb(src_seq) + self.position_enc(src_pos)
+        word_input = enc_output
         enc_slf_attn_list = []
         for encoder_layer in self.layer_stack:
             enc_output, enc_slf_attn = encoder_layer(

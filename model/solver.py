@@ -5,12 +5,14 @@ import torch.nn as nn
 import torch.nn.functional as F
 import models
 from layers import masked_cross_entropy
-from utils import to_var, time_desc_decorator, TensorboardWriter, pad_and_pack, normal_kl_div, to_bow, bag_of_words_loss, \
+from utils import to_var, time_desc_decorator, pad_and_pack, normal_kl_div, to_bow, bag_of_words_loss, \
     normal_kl_div, embedding_metric, push_zeros_right, SOS_ID
 import os
 import random
 from tqdm import tqdm
 from math import isnan
+import datetime
+from torch.utils.tensorboard import SummaryWriter
 import re
 import math
 import pickle
@@ -29,6 +31,8 @@ class Solver(object):
         self.vocab = vocab
         self.is_train = is_train
         self.model = model
+        # new code to run Tensorboard
+        self.writer = SummaryWriter('logdir/' + str(datetime.datetime.now()))
 
     @time_desc_decorator('Build Graph')
     def build(self, cuda=True):
@@ -64,7 +68,6 @@ class Solver(object):
             self.load_model(self.config.checkpoint)
 
         if self.is_train:
-            self.writer = TensorboardWriter(self.config.logdir)
             self.optimizer = self.config.optimizer(
                 filter(lambda p: p.requires_grad, self.model.parameters()),
                 lr=self.config.learning_rate)
@@ -125,14 +128,51 @@ class Solver(object):
                 step_i=epoch_i + 1,
                 name='validation_loss')
 
+    def format_convos_for_transformer(self, conversations):
+        empty = [0] * self.config.max_unroll
+        max_convo_len = max([len(convo) for convo in conversations])
+        conversations_pad = [convo + [empty] * (max_convo_len - len(convo)) for convo in conversations]
+        t_convos = to_var(torch.LongTensor(conversations_pad))
+        t_sent_lens = torch.sum((t_convos != 0).long(), 2)
+        # TODO it's a problem that batches are not i.i.d
+        # it starts at 1 because the baseline models also don't predict the first response
+        # for r_idx in range(1, max_convo_len):
+        # TODO restore loop through all responses
+        return t_convos, t_sent_lens
+
+
+    def extract_history_response(self, convos, idx):
+        # gather flattened conversation history
+        max_convo_len = convos.shape[1]
+        histories = convos[:, :idx, :]
+        histories = histories.view(histories.shape[0], -1)
+        histories = push_zeros_right(histories)  # move all utterance words to beginning of vector
+        max_tokens = max_convo_len * self.config.max_unroll
+        histories = histories[:, :max_tokens]
+        responses = convos[:, idx, :].contiguous()
+        histories = to_var(histories)
+        responses = to_var(responses)
+
+        return histories, responses
+
+    def add_sos(self, x):
+        sos_id = torch.tensor(SOS_ID).to(x.device).view(1, 1).expand(x.shape[0], -1)
+        gold = torch.cat([sos_id, x], 1)
+        return gold
+
     @time_desc_decorator('Training Start!')
     def train(self):
         epoch_loss_history = []
+
+        #print('\n<Validation before training>...')
+        #self.validation_loss = self.evaluate()
+
         for epoch_i in range(self.epoch_i, self.config.n_epoch):
             self.epoch_i = epoch_i
             batch_loss_history = []
             self.model.train()
             n_total_words = 0
+            prev_loss = None
             for batch_i, (conversations, conversation_length, sentence_length) in enumerate(tqdm(self.train_data_loader, ncols=80)):
                 # conversations: (batch_size) list of conversations
                 #   conversation: list of sentences
@@ -140,65 +180,27 @@ class Solver(object):
                 # conversation_length: list of int
                 # sentence_length: (batch_size) list of conversation list of sentence_lengths
 
+                tb_idx = len(self.train_data_loader) * epoch_i + batch_i  # always increments on every loop
+
                 if isinstance(self.model, TRANSFORMER):
-
-                    empty = [0] * self.config.max_unroll
-
-                    max_convo_len = max(conversation_length)
-
-                    conversations_pad = [convo + [empty] * (max_convo_len - len(convo)) for convo in conversations]
-
-                    t_convos = to_var(torch.LongTensor(conversations_pad))
-                    # We prune conversations to maximum allowed conversation length
-                    #t_convos = t_convos[:, -self.config.max_convo_len:, :]
-                    t_sent_lens = torch.sum((t_convos != 0).long(), 2)
-
-                    #t_convo_lens = torch.sum((t_sent_lens != 0).long(), 1)
-
-                    #assert (t_convo_lens == torch.LongTensor(conversation_length)).all()
-
-                    #TODO it's a problem that batches are not i.i.d
-
                     # here we generate each response separately and perform separate updates
                     response_losses = []
                     response_words = []
-                    # it starts at 1 because the baseline models also don't predict the first response
-                    #for r_idx in range(1, max_convo_len):
-
-                    #TODO restore loop through all responses
-
-                    r_idx = random.randint(1, max_convo_len - 1)
-
-                    # gather flattened conversation history
-                    histories = t_convos[:, :r_idx, :]
-                    histories = histories.view(histories.shape[0], -1)
-                    histories = push_zeros_right(histories)  # move all utterance words to beginning of vector
-
-                    max_tokens = max_convo_len * self.config.max_unroll
-                    # num_pad = max_tokens - histories.shape[1]
-                    #histories = F.pad(histories, [0, num_pad])
-                    histories = histories[:, :max_tokens]
-
-                    responses = t_convos[:, r_idx, :].contiguous()
-
-                    histories = to_var(histories)
-                    responses = to_var(responses)
+                    #
+                    convos, sent_lens = self.format_convos_for_transformer(conversations)
+                    r_idx = random.randint(1, convos.shape[1] - 1)
+                    histories, responses = self.extract_history_response(convos, r_idx)
 
                     self.optimizer.zero_grad()
 
-                    sos_id = torch.tensor(SOS_ID).to(responses.device).view(1, 1).expand(responses.shape[0], -1)
+                    gold = self.add_sos(responses)  # concat start of sequence token as input
 
-                    gold = torch.cat([sos_id, responses], 1)
-
-                    sentence_logits = self.model(
-                        histories,
-                        gold,
-                        decode=False)
+                    sentence_logits = self.model(histories, gold, decode=False)
 
                     response_loss, n_words = masked_cross_entropy(
                         sentence_logits,
                         responses,
-                        t_sent_lens[:, r_idx])
+                        sent_lens[:, r_idx])
 
                     response_losses.append(response_loss.item())
                     response_words.append(n_words)
@@ -207,7 +209,8 @@ class Solver(object):
                     response_loss.backward()
 
                     # Gradient cliping
-                    torch.nn.utils.clip_grad_norm_(self.model.parameters(), self.config.clip)
+                    norm = torch.nn.utils.clip_grad_norm_(self.model.parameters(), self.config.clip)
+                    self.writer.add_scalar('grad_norm', norm, tb_idx)
 
                     # Run optimizer
                     self.optimizer.step()
@@ -255,18 +258,26 @@ class Solver(object):
                     batch_loss.backward()
 
                     # Gradient cliping
-                    torch.nn.utils.clip_grad_norm_(self.model.parameters(), self.config.clip)
+                    norm = torch.nn.utils.clip_grad_norm_(self.model.parameters(), self.config.clip)
+
+                    self.writer.add_scalar('grad_norm', norm, tb_idx)
 
                     # Run optimizer
                     self.optimizer.step()
 
-            assert not isnan(batch_loss.item())
-            batch_loss_history.append(batch_loss.item())
-            n_total_words += n_words.item()
+                assert not isnan(batch_loss.item())
+                batch_loss_history.append(batch_loss.item())
+                n_total_words += n_words.item()
 
-            if batch_i % self.config.print_every == 0:
-                tqdm.write(
-                    f'Epoch: {epoch_i+1}, iter {batch_i}: loss = {batch_loss.item()/ n_words.item():.3f}')
+                current_loss = batch_loss.item() / n_words
+                if prev_loss is None: prev_loss = current_loss
+                self.writer.add_scalar('training_loss', current_loss, tb_idx)
+                self.writer.add_scalar('Training_loss_change', current_loss - prev_loss, tb_idx)
+                prev_loss = current_loss
+
+                if batch_i % self.config.print_every == 0:
+                    tqdm.write(
+                        f'Epoch: {epoch_i+1}, iter {batch_i}: loss = {batch_loss.item()/ n_words.item():.3f}')
 
             epoch_loss = np.sum(batch_loss_history) / n_total_words
             epoch_loss_history.append(epoch_loss)
@@ -278,11 +289,11 @@ class Solver(object):
             if epoch_i % self.config.save_every_epoch == 0:
                 self.save_model(epoch_i + 1)
 
-            print('\n<Validation>...')
+            print('\n<Valdidation>...')
             self.validation_loss = self.evaluate()
 
-            if epoch_i % self.config.plot_every_epoch == 0:
-                    self.write_summary(epoch_i)
+            #if epoch_i % self.config.plot_every_epoch == 0:
+                    #self.write_summary(epoch_i)
 
         self.save_model(self.config.n_epoch)
 
@@ -317,6 +328,9 @@ class Solver(object):
             print('')
 
     def evaluate(self):
+
+        #TODO allow Transformer to be evaluated in same way as other baselines
+
         self.model.eval()
         batch_loss_history = []
         n_total_words = 0
@@ -327,46 +341,64 @@ class Solver(object):
             # conversation_length: list of int
             # sentence_length: (batch_size) list of conversation list of sentence_lengths
 
-            input_conversations = [conv[:-1] for conv in conversations]
-            target_conversations = [conv[1:] for conv in conversations]
+            if isinstance(self.model, TRANSFORMER):
+                pass
+                # TODO reformat data for input to Transformer
+                convos, sent_lens = self.format_convos_for_transformer(conversations)
 
-            # flatten input and target conversations
-            input_sentences = [sent for conv in input_conversations for sent in conv]
-            target_sentences = [sent for conv in target_conversations for sent in conv]
-            input_sentence_length = [l for len_list in sentence_length for l in len_list[:-1]]
-            target_sentence_length = [l for len_list in sentence_length for l in len_list[1:]]
-            input_conversation_length = [l - 1 for l in conversation_length]
+                # compute logits for a given response in the convo, for all convos in batch
+                r_idx = random.randint(1, convos.shape[1] - 1)
+                histories, responses = self.extract_history_response(convos, r_idx)
+                gold = self.add_sos(responses)
 
-            with torch.no_grad():
-                input_sentences = to_var(torch.LongTensor(input_sentences))
-                target_sentences = to_var(torch.LongTensor(target_sentences))
-                input_sentence_length = to_var(torch.LongTensor(input_sentence_length))
-                target_sentence_length = to_var(torch.LongTensor(target_sentence_length))
-                input_conversation_length = to_var(
-                    torch.LongTensor(input_conversation_length))
+                sentence_logits = self.model(histories, gold, decode=False)
 
-            if batch_i == 0:
-                self.generate_sentence(input_sentences,
-                                       input_sentence_length,
-                                       input_conversation_length,
-                                       target_sentences)
+                batch_loss, n_words = masked_cross_entropy(sentence_logits, gold[:, :-1].contiguous(), sent_lens[:, r_idx])
 
-            sentence_logits = self.model(
-                input_sentences,
-                input_sentence_length,
-                input_conversation_length,
-                target_sentences)
+                # TODO format Transformer output to be the same as the baselines
+            else:
+                input_conversations = [conv[:-1] for conv in conversations]
+                target_conversations = [conv[1:] for conv in conversations]
 
-            batch_loss, n_words = masked_cross_entropy(
-                sentence_logits,
-                target_sentences,
-                target_sentence_length)
+                # flatten input and target conversations
+                input_sentences = [sent for conv in input_conversations for sent in conv]
+                target_sentences = [sent for conv in target_conversations for sent in conv]
+                input_sentence_length = [l for len_list in sentence_length for l in len_list[:-1]]
+                target_sentence_length = [l for len_list in sentence_length for l in len_list[1:]]
+                input_conversation_length = [l - 1 for l in conversation_length]
+
+                with torch.no_grad():
+                    input_sentences = to_var(torch.LongTensor(input_sentences))
+                    target_sentences = to_var(torch.LongTensor(target_sentences))
+                    input_sentence_length = to_var(torch.LongTensor(input_sentence_length))
+                    target_sentence_length = to_var(torch.LongTensor(target_sentence_length))
+                    input_conversation_length = to_var(
+                        torch.LongTensor(input_conversation_length))
+
+                if batch_i == 0 and not isinstance(self.model, TRANSFORMER):
+                    self.generate_sentence(input_sentences,
+                                           input_sentence_length,
+                                           input_conversation_length,
+                                           target_sentences)
+
+                sentence_logits = self.model(
+                    input_sentences,
+                    input_sentence_length,
+                    input_conversation_length,
+                    target_sentences)
+
+                batch_loss, n_words = masked_cross_entropy(
+                    sentence_logits,
+                    target_sentences,
+                    target_sentence_length)
 
             assert not isnan(batch_loss.item())
             batch_loss_history.append(batch_loss.item())
             n_total_words += n_words.item()
 
         epoch_loss = np.sum(batch_loss_history) / n_total_words
+
+        self.writer.add_scalar('val_loss', epoch_loss, self.epoch_i)
 
         print_str = f'Validation loss: {epoch_loss:.3f}\n'
         print(print_str)
@@ -515,6 +547,9 @@ class VariationalSolver(Solver):
 
     @time_desc_decorator('Training Start!')
     def train(self):
+
+        #TODO do not modify this!!!
+
         epoch_loss_history = []
         kl_mult = 0.0
         conv_kl_mult = 0.0
@@ -628,6 +663,9 @@ class VariationalSolver(Solver):
     def generate_sentence(self, sentences, sentence_length,
                           input_conversation_length, input_sentences, target_sentences):
         """Generate output of decoder (single batch)"""
+
+        #TODO do not modify this!!
+
         self.model.eval()
 
         # [batch_size, max_seq_len, vocab_size]
@@ -668,6 +706,8 @@ class VariationalSolver(Solver):
             #   sentence: list of tokens
             # conversation_length: list of int
             # sentence_length: (batch_size) list of conversation list of sentence_lengths
+
+            #TODO do not modify this!!!
 
             target_conversations = [conv[1:] for conv in conversations]
 

@@ -18,7 +18,7 @@ class TRANSFORMER(nn.Module):
         super(TRANSFORMER, self).__init__()
         self.config = config
         self.transformer = Transformer(config.vocab_size, config.vocab_size, config.max_convo_len * config.max_unroll, config.encoder_hidden_size,
-                                       config.encoder_hidden_size, config.encoder_hidden_size * 4, unet=False)  #TODO add unet
+                                       config.encoder_hidden_size, config.encoder_hidden_size * 4, unet=config.unet)  #TODO add unet
 
     def forward(self, histories, responses, decode=False):
         """
@@ -53,6 +53,12 @@ class TRANSFORMER(nn.Module):
             return logits
         else:
             raise NotImplementedError("We can't do beam decoding yet")
+
+    def evaluate(self, convo):
+        """Take as input a conversation history, and for each utterance i predict i+1. Output same
+        shape as input with additional dimension for logits over vocabulary.
+        """
+        #TODO allow Transformer to evaluate
 
     def generate(self, context, sentence_length, n_context):
         #TODO allow generation from Transformer

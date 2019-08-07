@@ -92,6 +92,7 @@ def get_config(parse=True, **optional_kwargs):
     parser.add_argument('--optimizer', type=str, default='Adam')
     parser.add_argument('--clip', type=float, default=1.0)
     parser.add_argument('--checkpoint', type=str, default=None)
+    parser.add_argument('--unet', action='store_true', default=False)
 
     # Generation
     parser.add_argument('--max_unroll', type=int, default=30)

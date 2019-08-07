@@ -2,6 +2,11 @@
 
 This is a repository to add hierarchy to the Transformer.
 
+Also used baseline code from this repository:
+https://github.com/ctr4si/A-Hierarchical-Latent-Structure-for-Variational-Conversation-Modeling
+
+MIT licenses can be found in the licenses folder.
+
 Below is the original README for the Pytorch Transformer implementation. Thank you for the code!
 
 --------------------------------------------------------------
