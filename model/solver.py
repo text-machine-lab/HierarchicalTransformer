@@ -8,6 +8,7 @@ from layers import masked_cross_entropy
 from utils import to_var, time_desc_decorator, TensorboardWriter, pad_and_pack, normal_kl_div, to_bow, bag_of_words_loss, \
     normal_kl_div, embedding_metric, push_zeros_right, SOS_ID
 import os
+import random
 from tqdm import tqdm
 from math import isnan
 import re
@@ -145,7 +146,7 @@ class Solver(object):
 
                     max_convo_len = max(conversation_length)
 
-                    conversations_pad = [[empty] * (max_convo_len - len(convo)) + convo for convo in conversations]
+                    conversations_pad = [convo + [empty] * (max_convo_len - len(convo)) for convo in conversations]
 
                     t_convos = to_var(torch.LongTensor(conversations_pad))
                     # We prune conversations to maximum allowed conversation length
@@ -162,60 +163,58 @@ class Solver(object):
                     response_losses = []
                     response_words = []
                     # it starts at 1 because the baseline models also don't predict the first response
-                    for r_idx in range(1, max_convo_len):
+                    #for r_idx in range(1, max_convo_len):
 
-                        # gather flattened conversation history
-                        histories = t_convos[:, :r_idx, :]
-                        histories = histories.view(histories.shape[0], -1)
-                        histories = push_zeros_right(histories)  # move all utterance words to beginning of vector
+                    #TODO restore loop through all responses
 
-                        #TODO make sure padding works with u-net transformer
+                    r_idx = random.randint(1, max_convo_len - 1)
 
-                        max_tokens = max_convo_len * self.config.max_unroll
-                        # num_pad = max_tokens - histories.shape[1]
-                        #histories = F.pad(histories, [0, num_pad])
-                        histories = histories[:, :max_tokens]
+                    # gather flattened conversation history
+                    histories = t_convos[:, :r_idx, :]
+                    histories = histories.view(histories.shape[0], -1)
+                    histories = push_zeros_right(histories)  # move all utterance words to beginning of vector
 
-                        responses = t_convos[:, r_idx, :].contiguous()
+                    max_tokens = max_convo_len * self.config.max_unroll
+                    # num_pad = max_tokens - histories.shape[1]
+                    #histories = F.pad(histories, [0, num_pad])
+                    histories = histories[:, :max_tokens]
 
-                        histories = to_var(histories)
-                        responses = to_var(responses)
+                    responses = t_convos[:, r_idx, :].contiguous()
 
-                        self.optimizer.zero_grad()
+                    histories = to_var(histories)
+                    responses = to_var(responses)
 
-                        sos_id = torch.tensor(SOS_ID).to(responses.device).view(1, 1).expand(responses.shape[0], -1)
+                    self.optimizer.zero_grad()
 
-                        gold = torch.cat([sos_id, responses], 1)
+                    sos_id = torch.tensor(SOS_ID).to(responses.device).view(1, 1).expand(responses.shape[0], -1)
 
-                        sentence_logits = self.model(
-                            histories,
-                            gold,
-                            decode=False)
+                    gold = torch.cat([sos_id, responses], 1)
 
-                        import pdb; pdb.set_trace()
+                    sentence_logits = self.model(
+                        histories,
+                        gold,
+                        decode=False)
 
-                        #TODO realign history so that there is no history with all zeros, this causes nan
+                    response_loss, n_words = masked_cross_entropy(
+                        sentence_logits,
+                        responses,
+                        t_sent_lens[:, r_idx])
 
-                        response_loss, n_words = masked_cross_entropy(
-                            sentence_logits,
-                            responses,
-                            t_sent_lens[:, r_idx])
+                    response_losses.append(response_loss.item())
+                    response_words.append(n_words)
 
-                        response_losses.append(response_loss)
-                        response_words.append(n_words)
+                    # Back-propagation
+                    response_loss.backward()
 
-                        # Back-propagation
-                        response_loss.backward()
+                    # Gradient cliping
+                    torch.nn.utils.clip_grad_norm_(self.model.parameters(), self.config.clip)
 
-                        # Gradient cliping
-                        torch.nn.utils.clip_grad_norm_(self.model.parameters(), self.config.clip)
-
-                        # Run optimizer
-                        self.optimizer.step()
+                    # Run optimizer
+                    self.optimizer.step()
 
                     # calculate the batch loss and word count across all responses
-                    batch_loss = torch.sum(response_losses)
-                    n_words = torch.sum(response_words)
+                    batch_loss = np.sum(response_losses)
+                    n_words = np.sum(response_words)
 
                 else:
 

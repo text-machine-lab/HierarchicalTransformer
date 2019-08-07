@@ -15,9 +15,11 @@ def calc_pos(x):
 def push_zeros_right(x):
     y = torch.empty(0, x.size(1)).long().to(x.device)
     for r in x:
-        nz = r.nonzero().squeeze()
+        nz = r.nonzero().squeeze(1)
         z = torch.zeros(r.numel() - nz.numel()).long().to(x.device)
+
         z = torch.cat((r[nz], z)).unsqueeze(0)
+
         y = torch.cat((y, z))
     return y
 

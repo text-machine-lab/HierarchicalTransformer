@@ -49,8 +49,6 @@ class TRANSFORMER(nn.Module):
 
         logits = self.transformer(histories, history_pos, responses, response_pos, flat_logits=False)
 
-        print(logits.shape)
-
         if not decode:
             return logits
         else:
