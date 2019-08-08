@@ -2,6 +2,7 @@ from itertools import cycle
 import numpy as np
 import torch
 import torch.nn as nn
+import torch.optim as optim
 import torch.nn.functional as F
 import models
 from layers import masked_cross_entropy
@@ -18,6 +19,14 @@ import math
 import pickle
 import gensim
 from models import TRANSFORMER
+
+import sys
+sys.path.append('..')
+from transformer.Optim import ScheduledOptim
+
+import tgalert
+
+alert = tgalert.TelegramAlert()
 
 
 word2vec_path = "../datasets/GoogleNews-vectors-negative300.bin"
@@ -56,6 +65,9 @@ class Solver(object):
                         dim = int(param.size(0) / 3)
                         param.data[dim:2 * dim].fill_(2.0)
 
+        n_params = sum([param.numel() for param in self.model.parameters()])
+        print('Number of parameters: %s' % n_params)
+
         if torch.cuda.is_available() and cuda:
             self.model.cuda()
 
@@ -68,9 +80,18 @@ class Solver(object):
             self.load_model(self.config.checkpoint)
 
         if self.is_train:
-            self.optimizer = self.config.optimizer(
-                filter(lambda p: p.requires_grad, self.model.parameters()),
-                lr=self.config.learning_rate)
+            if isinstance(self.model, TRANSFORMER):
+
+                self.optimizer = ScheduledOptim(
+                    optim.Adam(
+                        filter(lambda x: x.requires_grad, self.model.parameters()),
+                        betas=(0.9, 0.98), eps=1e-09),
+                    self.config.encoder_hidden_size, self.config.n_warmup_steps, lr_factor=self.config.learning_rate)
+
+            else:
+                self.optimizer = self.config.optimizer(
+                    filter(lambda p: p.requires_grad, self.model.parameters()),
+                    lr=self.config.learning_rate)
 
     def save_model(self, epoch):
         """Save parameters to checkpoint"""
@@ -213,7 +234,7 @@ class Solver(object):
                     self.writer.add_scalar('grad_norm', norm, tb_idx)
 
                     # Run optimizer
-                    self.optimizer.step()
+                    self.optimizer.step_and_update_lr()
 
                     # calculate the batch loss and word count across all responses
                     batch_loss = np.sum(response_losses)

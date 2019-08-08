@@ -96,6 +96,7 @@ def get_config(parse=True, **optional_kwargs):
 
     # Generation
     parser.add_argument('--max_unroll', type=int, default=30)
+    parser.add_argument('--n_warmup_steps', type=int, default=4000)
     parser.add_argument('--max_convo_len', type=int, default=10)  # ONLY USED FOR TRANSFORMER!!!
     parser.add_argument('--sample', type=str2bool, default=False,
                         help='if false, use beam search for decoding')
