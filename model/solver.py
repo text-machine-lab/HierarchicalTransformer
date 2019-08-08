@@ -26,7 +26,7 @@ from transformer.Optim import ScheduledOptim
 
 import tgalert
 
-alert = tgalert.TelegramAlert()
+alert = tgalert.TelegramAlert(disable=True)
 
 
 word2vec_path = "../datasets/GoogleNews-vectors-negative300.bin"
@@ -207,21 +207,44 @@ class Solver(object):
                     # here we generate each response separately and perform separate updates
                     response_losses = []
                     response_words = []
-                    #
-                    convos, sent_lens = self.format_convos_for_transformer(conversations)
-                    r_idx = random.randint(1, convos.shape[1] - 1)
-                    histories, responses = self.extract_history_response(convos, r_idx)
+
+                    # TODO change Transformer input format to be more similar to HRED
+                    # start from index 1, as HRED and other models do not predict the first sentence
+                    input_histories_ls = [conv[:i] for conv in conversations for i in range(1, len(conv))]
+                    target_sentences = [conv[i] for conv in conversations for i in range(1, len(conv))]
+
+                    input_histories_joined = [[token for sentence in history for token in sentence if token != 0]
+                                                     for history in input_histories_ls]
+                    max_history_len = max([len(history) for history in input_histories_joined])
+                    input_histories_padded = [history + [0] * (max_history_len - len(history))
+                                                     for history in input_histories_joined]
+
+                    input_histories = to_var(torch.LongTensor(input_histories_padded))
+                    target_sentences = to_var(torch.LongTensor(target_sentences))
+
+                    # TODO change "max_convo_len" to max responses
+                    # this can protect against random memory shortages
+                    input_histories = input_histories[:self.config.max_convo_len]
+                    target_sentences = target_sentences[:self.config.max_convo_len]
+
+                    print(target_sentences.shape[0])
+
+                    sentence_lens = (target_sentences != 0).long().sum(1)
+
+                    #convos, sent_lens = self.format_convos_for_transformer(conversations)
+                    #r_idx = random.randint(1, convos.shape[1] - 1)
+                    #histories, responses = self.extract_history_response(convos, r_idx)
 
                     self.optimizer.zero_grad()
 
-                    gold = self.add_sos(responses)  # concat start of sequence token as input
+                    gold = self.add_sos(target_sentences)  # concat start of sequence token as input
 
-                    sentence_logits = self.model(histories, gold, decode=False)
+                    sentence_logits = self.model(input_histories, gold, decode=False)
 
                     response_loss, n_words = masked_cross_entropy(
                         sentence_logits,
-                        responses,
-                        sent_lens[:, r_idx])
+                        target_sentences,
+                        sentence_lens)
 
                     response_losses.append(response_loss.item())
                     response_words.append(n_words)
