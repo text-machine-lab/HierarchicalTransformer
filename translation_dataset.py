@@ -13,8 +13,6 @@ def paired_collate_fn(insts):
 def collate_fn(insts):
     ''' Pad the instance to the max seq length in batch '''
 
-    #TODO use this to produce position vectors for input/output sequences
-
     max_len = max(len(inst) for inst in insts)
 
     batch_seq = np.array([

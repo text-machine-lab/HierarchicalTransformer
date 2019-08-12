@@ -10,15 +10,12 @@ from transformer.Models import Transformer
 
 VariationalModels = ['VHRED', 'VHCR']
 
-#TODO insert Transformer model here
-
-
 class TRANSFORMER(nn.Module):
     def __init__(self, config):
         super(TRANSFORMER, self).__init__()
         self.config = config
         self.transformer = Transformer(config.vocab_size, config.vocab_size, config.max_convo_len * config.max_unroll, config.encoder_hidden_size,
-                                       config.encoder_hidden_size, config.encoder_hidden_size * 4, unet=config.unet)  #TODO add unet
+                                       config.encoder_hidden_size, config.encoder_hidden_size * 4, unet=config.unet)
 
     def forward(self, histories, responses, decode=False):
         """
@@ -30,17 +27,6 @@ class TRANSFORMER(nn.Module):
                 - train: [batch_size, seq_len, vocab_size]
                 - eval: [batch_size, seq_len]
         """
-
-        # Game Plan: Given a conversation, train on each (history, response) pair separately. This may be slower.
-        # Predict batch response given history. Vector is pruned to number of utterances equal to the longest conversation,
-        # guaranteeing that every prediction will have at least one utterance to predict to avoid overflow.
-
-        # 1.) Receive padded history and response as input
-        # 2.) Run Transformer on this input
-        # 3.) Return logits for response only
-        # 4.) Evaluate loss and backpropagate for each response in conversation
-
-        #TODO run Transformer on conversation history to produce response logits
 
         # calculate position vectors to locate each token
         # padding tokens set to zero
@@ -128,8 +114,6 @@ class HRED(nn.Module):
 
         # encoder_hidden: [num_sentences, num_layers * direction * hidden_size]
         encoder_hidden = encoder_hidden.transpose(1, 0).contiguous().view(num_sentences, -1)
-
-        #TODO use the following two lines to format the data for input to Transformer
 
         # pad and pack encoder_hidden
         start = torch.cumsum(torch.cat((to_var(input_conversation_length.data.new(1).zero_()),

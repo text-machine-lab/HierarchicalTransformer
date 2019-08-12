@@ -30,7 +30,8 @@ if __name__ == '__main__':
         conversation_length=load_pickle(config.conversation_length_path),
         sentence_length=load_pickle(config.sentence_length_path),
         vocab=vocab,
-        batch_size=config.batch_size)
+        batch_size=config.batch_size,
+        max_examples=config.max_examples)
 
     eval_data_loader = get_loader(
         sentences=load_pickle(val_config.sentences_path),
@@ -38,6 +39,7 @@ if __name__ == '__main__':
         sentence_length=load_pickle(val_config.sentence_length_path),
         vocab=vocab,
         batch_size=val_config.eval_batch_size,
+        max_examples=config.max_examples,
         shuffle=False)
 
     # for testing

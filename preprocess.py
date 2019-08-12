@@ -160,8 +160,6 @@ def main():
             'src': valid_src_insts,
             'tgt': valid_tgt_insts}}
 
-    #TODO here we print out examples from training and validation sets
-
     src_idx2word = {idx: word for word, idx in src_word2idx.items()}
     tgt_idx2word = {idx: word for word, idx in tgt_word2idx.items()}
 

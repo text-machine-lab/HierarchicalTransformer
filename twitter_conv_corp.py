@@ -49,7 +49,6 @@ class TwitterConversationCorpusConverter:
 
 
 def clean_utterance(text):
-    #TODO tokenize with nltk and lowercase among other things
     text_tk = ' '.join(word_tokenize(text.lower().strip()))
     return text_tk
 

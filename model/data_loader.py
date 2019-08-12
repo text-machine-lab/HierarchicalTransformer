@@ -6,12 +6,13 @@ import numpy as np
 
 
 class DialogDataset(Dataset):
-    def __init__(self, sentences, conversation_length, sentence_length, vocab, data=None):
+    def __init__(self, sentences, conversation_length, sentence_length, vocab, data=None, max_examples=None):
 
         # [total_data_size, max_conversation_length, max_sentence_length]
         # tokenized raw text of sentences
         self.sentences = sentences
         self.vocab = vocab
+        self.max_examples = max_examples
 
         # conversation length of each batch
         # [total_data_size]
@@ -36,7 +37,10 @@ class DialogDataset(Dataset):
         return sentence, conversation_length, sentence_length
 
     def __len__(self):
-        return self.len
+        if self.max_examples is not None:
+            return min(self.len, self.max_examples)
+        else:
+            return self.len
 
     def sent2id(self, sentences):
         """word => word id"""
@@ -44,7 +48,7 @@ class DialogDataset(Dataset):
         return [self.vocab.sent2id(sentence) for sentence in sentences]
 
 
-def get_loader(sentences, conversation_length, sentence_length, vocab, batch_size=100, data=None, shuffle=True):
+def get_loader(sentences, conversation_length, sentence_length, vocab, batch_size=100, data=None, max_examples=None, shuffle=True):
     """Load DataLoader of given DialogDataset"""
 
     def collate_fn(data):
@@ -70,7 +74,7 @@ def get_loader(sentences, conversation_length, sentence_length, vocab, batch_siz
         return sentences, conversation_length, sentence_length
 
     dataset = DialogDataset(sentences, conversation_length,
-                            sentence_length, vocab, data=data)
+                            sentence_length, vocab, data=data, max_examples=max_examples)
 
     data_loader = DataLoader(
         dataset=dataset,

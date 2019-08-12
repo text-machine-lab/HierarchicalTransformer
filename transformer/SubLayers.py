@@ -19,8 +19,6 @@ class MultiHeadAttention(nn.Module):
         :param dropout: regularization constant
         """
 
-        #TODO adjust attention size for increasing larger layers
-
         super().__init__()
 
         d_in = d_in if d_in is not None else d_out

@@ -26,7 +26,7 @@ from transformer.Optim import ScheduledOptim
 
 import tgalert
 
-alert = tgalert.TelegramAlert(disable=True)
+alert = tgalert.TelegramAlert()
 
 
 word2vec_path = "../datasets/GoogleNews-vectors-negative300.bin"
@@ -164,7 +164,6 @@ class Solver(object):
     #     # TODO it's a problem that batches are not i.i.d
     #     # it starts at 1 because the baseline models also don't predict the first response
     #     # for r_idx in range(1, max_convo_len):
-    #     # TODO restore loop through all responses
     #     return t_convos, t_sent_lens
     #
     #
@@ -192,9 +191,11 @@ class Solver(object):
         input_histories_padded = [history + [0] * (max_history_len - len(history))
                                   for history in input_histories_joined]
 
-        pairs = zip(input_histories_padded, target_sentences)
+        # we shuffle in case examples are removed from the end to fit memory requirements
+        pairs = list(zip(input_histories_padded, target_sentences))
         random.shuffle(pairs)
-        input_histories_shuf, target_sentences_shuf = pairs
+        input_histories_shuf = [pair[0] for pair in pairs]
+        target_sentences_shuf = [pair[1] for pair in pairs]
 
         input_histories = to_var(torch.LongTensor(input_histories_shuf))
         target_sentences = to_var(torch.LongTensor(target_sentences_shuf))
@@ -234,6 +235,7 @@ class Solver(object):
                     response_words = []
 
                     # TODO do another run through the code to make sure loss calculation is correct
+                    # TODO implement ability to train on less examples
                     # start from index 1, as HRED and other models do not predict the first sentence
                     # input_histories_ls = [conv[:i] for conv in conversations for i in range(1, len(conv))]
                     # target_sentences = [conv[i] for conv in conversations for i in range(1, len(conv))]
