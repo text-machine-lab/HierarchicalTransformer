@@ -71,6 +71,8 @@ class Encoder(nn.Module):
         self.src_word_emb = nn.Embedding(
             n_src_vocab, d_word_vec, padding_idx=Constants.PAD)
 
+        self.seg_enc = nn.Embedding(len_max_seq, d_word_vec, padding_idx=Constants.PAD)
+
         self.position_enc = nn.Embedding.from_pretrained(
             get_sinusoid_encoding_table(n_position, d_word_vec, padding_idx=0),
             freeze=True)
@@ -79,7 +81,7 @@ class Encoder(nn.Module):
             EncoderLayer(d_model, d_inner, n_head, d_k, d_v, dropout=dropout)
             for _ in range(self.n_layers)])
 
-    def forward(self, src_seq, src_pos, return_attns=False):
+    def forward(self, src_seq, src_pos, src_segs=None, return_attns=False):
 
         # -- Prepare masks
         slf_attn_mask = get_attn_key_pad_mask(seq_k=src_seq, seq_q=src_seq)
@@ -87,6 +89,10 @@ class Encoder(nn.Module):
 
         # -- Forward
         enc_output = self.src_word_emb(src_seq) + self.position_enc(src_pos)
+
+        if src_segs is not None:
+            enc_output = enc_output + self.seg_enc(src_segs)
+
         word_input = enc_output
         enc_slf_attn_list = []
         for encoder_layer in self.layer_stack:
@@ -358,10 +364,10 @@ class Transformer(nn.Module):
             "To share word embedding table, the vocabulary size of src/tgt shall be the same."
             self.encoder.src_word_emb.weight = self.decoder.tgt_word_emb.weight
 
-    def forward(self, src_seq, src_pos, tgt_seq, tgt_pos, flat_logits=True):
+    def forward(self, src_seq, src_pos, tgt_seq, tgt_pos, src_segs=None, flat_logits=True):
         tgt_seq, tgt_pos = tgt_seq[:, :-1], tgt_pos[:, :-1]
 
-        enc_output, *_ = self.encoder(src_seq, src_pos)
+        enc_output, *_ = self.encoder(src_seq, src_pos, src_segs=src_segs)
         dec_output, *_ = self.decoder(tgt_seq, tgt_pos, src_seq, enc_output)
         seq_logit = self.tgt_word_prj(dec_output) * self.x_logit_scale
 

@@ -49,6 +49,9 @@ if __name__ == '__main__':
     else:
         solver = Solver
 
+    print('Num train batches: %s' % len(train_data_loader))
+    print('Num valid batches: %s' % len(eval_data_loader))
+
     solver = solver(config, train_data_loader, eval_data_loader, vocab=vocab, is_train=True)
 
     solver.build()

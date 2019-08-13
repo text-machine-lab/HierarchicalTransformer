@@ -1,6 +1,6 @@
 import torch
 import torch.nn as nn
-from utils import to_var, pad, normal_kl_div, normal_logpdf, bag_of_words_loss, to_bow, EOS_ID, calc_pos
+from utils import to_var, pad, normal_kl_div, normal_logpdf, bag_of_words_loss, to_bow, EOS_ID, calc_pos, calc_seg
 import layers
 import numpy as np
 import sys
@@ -17,7 +17,7 @@ class TRANSFORMER(nn.Module):
         self.transformer = Transformer(config.vocab_size, config.vocab_size, config.max_convo_len * config.max_unroll, config.encoder_hidden_size,
                                        config.encoder_hidden_size, config.encoder_hidden_size * 4, unet=config.unet)
 
-    def forward(self, histories, responses, decode=False):
+    def forward(self, histories, segments, responses, decode=False):
         """
         Args:
             histories: (LongTensor) [batch_size, convo_len, seq_len]
@@ -33,7 +33,9 @@ class TRANSFORMER(nn.Module):
         history_pos = calc_pos(histories)
         response_pos = calc_pos(responses)
 
-        logits = self.transformer(histories, history_pos, responses, response_pos, flat_logits=False)
+        history_segs = calc_seg(histories)
+
+        logits = self.transformer(histories, history_pos, responses, response_pos, flat_logits=False, src_segs=segments)
 
         if not decode:
             return logits
