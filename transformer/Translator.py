@@ -10,41 +10,58 @@ from transformer.Beam import Beam
 class Translator(object):
     ''' Load with trained model and handle the beam search '''
 
-    def __init__(self, opt):
+    def __init__(self, opt=None, model=None, beam_size=None, max_seq_len=None, n_best=1):
+        assert opt is not None or model is not None
         self.opt = opt
-        self.device = torch.device('cuda' if opt.cuda else 'cpu')
+        self.device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
-        checkpoint = torch.load(opt.model)
-        model_opt = checkpoint['settings']
-        self.model_opt = model_opt
+        if beam_size is None:
+            self.beam_size = opt.beam_size
+        else:
+            self.beam_size = beam_size
 
-        model = Transformer(
-            model_opt.src_vocab_size,
-            model_opt.tgt_vocab_size,
-            model_opt.max_token_seq_len,
-            tgt_emb_prj_weight_sharing=model_opt.proj_share_weight,
-            emb_src_tgt_weight_sharing=model_opt.embs_share_weight,
-            d_k=model_opt.d_k,
-            d_v=model_opt.d_v,
-            d_model=model_opt.d_model,
-            d_word_vec=model_opt.d_word_vec,
-            d_inner=model_opt.d_inner_hid,
-            n_layers=model_opt.n_layers,
-            n_head=model_opt.n_head,
-            dropout=model_opt.dropout)
+        self.max_seq_len = max_seq_len
+        self.n_best = n_best
 
-        model.load_state_dict(checkpoint['model'])
-        print('[Info] Trained model state loaded.')
+        if opt is not None:
+            self.n_best = opt.n_best
+
+        if model is None:
+            checkpoint = torch.load(opt.model)
+            model_opt = checkpoint['settings']
+            self.model_opt = model_opt
+
+            if self.max_seq_len is None:
+                self.max_seq_len = self.model_opt.max_token_seq_len
+
+            model = Transformer(
+                model_opt.src_vocab_size,
+                model_opt.tgt_vocab_size,
+                model_opt.max_token_seq_len,
+                tgt_emb_prj_weight_sharing=model_opt.proj_share_weight,
+                emb_src_tgt_weight_sharing=model_opt.embs_share_weight,
+                d_k=model_opt.d_k,
+                d_v=model_opt.d_v,
+                d_model=model_opt.d_model,
+                d_word_vec=model_opt.d_word_vec,
+                d_inner=model_opt.d_inner_hid,
+                n_layers=model_opt.n_layers,
+                n_head=model_opt.n_head,
+                dropout=model_opt.dropout)
+
+            model.load_state_dict(checkpoint['model'])
+            print('[Info] Trained model state loaded.')
 
         model.word_prob_prj = nn.LogSoftmax(dim=1)
 
         model = model.to(self.device)
 
         self.model = model
-        self.model.eval()
 
-    def translate_batch(self, src_seq, src_pos):
+    def translate_batch(self, src_seq, src_pos, src_segs=None):
         ''' Translation work in one batch '''
+
+        self.model.eval()
 
         def get_inst_idx_to_tensor_position_map(inst_idx_list):
             ''' Indicate the position of an instance in a tensor. '''
@@ -134,10 +151,14 @@ class Translator(object):
         with torch.no_grad():
             #-- Encode
             src_seq, src_pos = src_seq.to(self.device), src_pos.to(self.device)
-            src_enc, *_ = self.model.encoder(src_seq, src_pos)
+
+            if src_segs is not None:
+                src_segs.to(self.device)
+
+            src_enc, *_ = self.model.encoder(src_seq, src_pos, src_segs=src_segs)
 
             #-- Repeat data for beam search
-            n_bm = self.opt.beam_size
+            n_bm = self.beam_size
             n_inst, len_s, d_h = src_enc.size()
             src_seq = src_seq.repeat(1, n_bm).view(n_inst * n_bm, len_s)
             src_enc = src_enc.repeat(1, n_bm, 1).view(n_inst * n_bm, len_s, d_h)
@@ -150,7 +171,7 @@ class Translator(object):
             inst_idx_to_position_map = get_inst_idx_to_tensor_position_map(active_inst_idx_list)
 
             #-- Decode
-            for len_dec_seq in range(1, self.model_opt.max_token_seq_len + 1):
+            for len_dec_seq in range(1, self.max_seq_len + 1):
 
                 active_inst_idx_list = beam_decode_step(
                     inst_dec_beams, len_dec_seq, src_seq, src_enc, inst_idx_to_position_map, n_bm)
@@ -161,6 +182,6 @@ class Translator(object):
                 src_seq, src_enc, inst_idx_to_position_map = collate_active_info(
                     src_seq, src_enc, inst_idx_to_position_map, active_inst_idx_list)
 
-        batch_hyp, batch_scores = collect_hypothesis_and_scores(inst_dec_beams, self.opt.n_best)
+        batch_hyp, batch_scores = collect_hypothesis_and_scores(inst_dec_beams, self.n_best)
 
         return batch_hyp, batch_scores

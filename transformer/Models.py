@@ -125,6 +125,8 @@ class UNetEncoder(nn.Module):
         self.src_word_emb = nn.Embedding(
             n_src_vocab, d_word_vec, padding_idx=Constants.PAD)
 
+        self.seg_enc = nn.Embedding(len_max_seq, d_word_vec, padding_idx=Constants.PAD)
+
         self.position_enc = nn.Embedding.from_pretrained(
             get_sinusoid_encoding_table(n_position, d_word_vec, padding_idx=0),
             freeze=True)
@@ -159,7 +161,7 @@ class UNetEncoder(nn.Module):
         self.maxpool1d = nn.MaxPool1d(3, stride=2, padding=1)
 
 
-    def forward(self, src_seq, src_pos, return_attns=False):
+    def forward(self, src_seq, src_pos, src_segs=None, return_attns=False):
 
         # -- Prepare masks
         slf_attn_mask = get_attn_key_pad_mask(seq_k=src_seq, seq_q=src_seq)  # b x l
@@ -167,6 +169,9 @@ class UNetEncoder(nn.Module):
 
         # -- Forward
         enc_output = self.src_word_emb(src_seq) + self.position_enc(src_pos)
+
+        if src_segs is not None:
+            enc_output = enc_output + self.seg_enc(src_segs)
 
         # start with bit representation of padding tokens (non_pad_mask)
 
@@ -328,7 +333,7 @@ class Transformer(nn.Module):
             emb_src_tgt_weight_sharing=True, unet=True):
 
         super().__init__()
-
+        self.len_max_seq = len_max_seq
         # this is the major modification of the project
         encoder_type = Encoder if not unet else UNetEncoder
 

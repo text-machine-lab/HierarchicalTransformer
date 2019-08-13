@@ -119,16 +119,18 @@ class Vocab(object):
         elif isinstance(list_like, Tensor):
             return list(list_like.numpy())
 
-    def id2sent(self, id_list):
+    def id2sent(self, id_list, stop_at_eos=True):
+        # TODO change this back to stop at EOS token!!
         """list of id => list of tokens (Single sentence)"""
         id_list = self.to_list(id_list)
         sentence = []
         for id in id_list:
             word = self.id2word[id]
-            if word not in [EOS_TOKEN, SOS_TOKEN, PAD_TOKEN]:
-                sentence.append(word)
-            if word == EOS_TOKEN:
+            if word == PAD_TOKEN:
                 break
+            if stop_at_eos and word == EOS_TOKEN:
+                break
+            sentence.append(word)
         return sentence
 
     def sent2id(self, sentence, var=False):
@@ -138,6 +140,6 @@ class Vocab(object):
             id_list = to_var(torch.LongTensor(id_list), eval=True)
         return id_list
 
-    def decode(self, id_list):
-        sentence = self.id2sent(id_list)
+    def decode(self, id_list, stop_at_eos=True):
+        sentence = self.id2sent(id_list, stop_at_eos=stop_at_eos)
         return ' '.join(sentence)

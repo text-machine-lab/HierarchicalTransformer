@@ -69,7 +69,7 @@ class Solver(object):
             alert.disable = True
 
         self.writer = SummaryWriter('logdir/' + str(datetime.datetime.now()) + '-'
-                                    + str(type(self.model)) + '-' + str(self.config.n_epoch))
+                                    + str(type(self.model)) + '-' + str(self.config.n_epoch) +'epochs' + '-' + str(len(self.train_data_loader)) + 'batches')
 
         n_params = sum([param.numel() for param in self.model.parameters()])
         print('Number of parameters: %s' % n_params)
@@ -218,8 +218,8 @@ class Solver(object):
     def train(self):
         epoch_loss_history = []
 
-        #print('\n<Validation before training>...')
-        #self.validation_loss = self.evaluate()
+        print('\n<Validation before training>...')
+        self.validation_loss = self.evaluate()
 
         for epoch_i in range(self.epoch_i, self.config.n_epoch):
             self.epoch_i = epoch_i
@@ -242,8 +242,6 @@ class Solver(object):
                     response_words = []
 
                     # TODO do another run through the code to make sure loss calculation is correct
-                    # TODO add segment embeddings
-                    # TODO print out inputs to be sure they are correct
                     # start from index 1, as HRED and other models do not predict the first sentence
                     # input_histories_ls = [conv[:i] for conv in conversations for i in range(1, len(conv))]
                     # target_sentences = [conv[i] for conv in conversations for i in range(1, len(conv))]
@@ -266,7 +264,10 @@ class Solver(object):
                     self.writer.add_scalar('batch_size', input_histories.shape[0], tb_idx)
                     self.writer.add_scalar('history_len', input_histories.shape[1], tb_idx)
                     self.writer.add_scalar('output_size', target_sentences.numel(), tb_idx)
-                    self.writer.add_scalar('learning_rate', self.optimizer.init_lr * self.optimizer._get_lr_scale(), tb_idx)
+
+                    # divide by zero error on first batch
+                    if batch_i > 0:
+                        self.writer.add_scalar('learning_rate', self.optimizer.init_lr * self.optimizer._get_lr_scale(), tb_idx)
 
                     # # manually flush writer after each iteration
                     # for writer in self.writer.all_writers.values():
@@ -281,6 +282,8 @@ class Solver(object):
                     self.optimizer.zero_grad()
 
                     gold = self.add_sos(target_sentences)  # concat start of sequence token as input
+
+                    # TODO here print history, response and gold
 
                     sentence_logits = self.model(input_histories, history_segments, gold, decode=False)
 
@@ -416,6 +419,31 @@ class Solver(object):
                 print(s)
             print('')
 
+    def generate_transformer_sentence(self, input_histories, history_segments, target_sentences):
+        self.model.eval()
+
+        gold = self.add_sos(target_sentences)
+
+        # [batch_size, max_seq_len, vocab_size]
+        generated_sentences = self.model(input_histories, history_segments, gold, decode=True)
+
+        # write output to file
+        with open(os.path.join(self.config.save_path, 'samples.txt'), 'a') as f:
+            f.write(f'<Epoch {self.epoch_i}>\n\n')
+
+            tqdm.write('\n<Samples>')
+            for input_sent, target_sent, output_sent in zip(input_histories, target_sentences, generated_sentences):
+                input_sent = self.vocab.decode(input_sent, stop_at_eos=False)
+                target_sent = self.vocab.decode(target_sent)
+                output_sent = '\n'.join([self.vocab.decode(sent) for sent in output_sent])
+                s = '\n'.join(['Input sentence: ' + input_sent,
+                               'Ground truth: ' + target_sent,
+                               'Generated response: ' + output_sent + '\n'])
+                f.write(s + '\n')
+                print(s)
+            print('')
+
+
     def evaluate(self):
 
         self.model.eval()
@@ -447,6 +475,10 @@ class Solver(object):
                     sentence_logits = self.model(input_histories, history_segments, gold, decode=False)
 
                     batch_loss, n_words = masked_cross_entropy(sentence_logits, target_sentences, sentence_lens)
+
+                    if batch_i == 0:
+                        self.generate_transformer_sentence(input_histories, history_segments, target_sentences)
+
                 else:
                     input_conversations = [conv[:-1] for conv in conversations]
                     target_conversations = [conv[1:] for conv in conversations]
@@ -466,7 +498,7 @@ class Solver(object):
                     input_conversation_length = to_var(
                         torch.LongTensor(input_conversation_length))
 
-                    if batch_i == 0 and not isinstance(self.model, TRANSFORMER):
+                    if batch_i == 0:
                         self.generate_sentence(input_sentences,
                                                input_sentence_length,
                                                input_conversation_length,

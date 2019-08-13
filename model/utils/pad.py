@@ -12,11 +12,6 @@ def calc_pos(x):
     return p * mask
 
 
-def calc_seg(x):
-    """input x of shape (batch_size, seq_len). Output Tensor same shape with segment embeddings
-    for each segment (each segment is separated by a """
-
-
 def push_zeros_right(x):
     y = torch.empty(0, x.size(1)).long().to(x.device)
     for r in x:

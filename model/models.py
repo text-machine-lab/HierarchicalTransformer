@@ -1,12 +1,13 @@
 import torch
 import torch.nn as nn
-from utils import to_var, pad, normal_kl_div, normal_logpdf, bag_of_words_loss, to_bow, EOS_ID, calc_pos, calc_seg
+from utils import to_var, pad, normal_kl_div, normal_logpdf, bag_of_words_loss, to_bow, EOS_ID, calc_pos
 import layers
 import numpy as np
 import sys
 sys.path.append('..') # ASSUMPTION - THIS MODULE LIES IN DIR NEXT TO TRANSFORMER DIR
 import random
 from transformer.Models import Transformer
+from transformer.Translator import Translator
 
 VariationalModels = ['VHRED', 'VHCR']
 
@@ -16,6 +17,7 @@ class TRANSFORMER(nn.Module):
         self.config = config
         self.transformer = Transformer(config.vocab_size, config.vocab_size, config.max_convo_len * config.max_unroll, config.encoder_hidden_size,
                                        config.encoder_hidden_size, config.encoder_hidden_size * 4, unet=config.unet)
+        self.translator = Translator(model=self.transformer, beam_size=config.beam_size, max_seq_len=config.gen_response_len)
 
     def forward(self, histories, segments, responses, decode=False):
         """
@@ -33,24 +35,16 @@ class TRANSFORMER(nn.Module):
         history_pos = calc_pos(histories)
         response_pos = calc_pos(responses)
 
-        history_segs = calc_seg(histories)
-
         logits = self.transformer(histories, history_pos, responses, response_pos, flat_logits=False, src_segs=segments)
 
         if not decode:
             return logits
         else:
-            raise NotImplementedError("We can't do beam decoding yet")
-
-    def evaluate(self, convo):
-        """Take as input a conversation history, and for each utterance i predict i+1. Output same
-        shape as input with additional dimension for logits over vocabulary.
-        """
-        #TODO allow Transformer to evaluate
+            batch_hyp, batch_logits = self.translator.translate_batch(histories, history_pos, src_segs=segments)
+            return batch_hyp
 
     def generate(self, context, sentence_length, n_context):
-        #TODO allow generation from Transformer
-        return 0.0
+        raise NotImplementedError('Generate not implemented!')
 
 
 class HRED(nn.Module):
