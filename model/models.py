@@ -6,7 +6,7 @@ import numpy as np
 import sys
 sys.path.append('..') # ASSUMPTION - THIS MODULE LIES IN DIR NEXT TO TRANSFORMER DIR
 import random
-from transformer.Models import Transformer
+from transformer.Models import Transformer, UNetTransformer
 from transformer.Translator import Translator
 
 VariationalModels = ['VHRED', 'VHCR']
@@ -15,8 +15,11 @@ class TRANSFORMER(nn.Module):
     def __init__(self, config):
         super(TRANSFORMER, self).__init__()
         self.config = config
-        self.transformer = Transformer(config.vocab_size, config.vocab_size, config.max_convo_len * config.max_unroll, config.encoder_hidden_size,
+        transformer_type = Transformer if not config.unet else UNetTransformer
+        self.transformer = transformer_type(config.vocab_size, config.vocab_size, config.max_unroll, config.encoder_hidden_size,
                                        config.encoder_hidden_size, config.encoder_hidden_size * 4, unet=config.unet)
+
+        # TODO try removing weight sharing
         self.translator = Translator(model=self.transformer, beam_size=config.beam_size, max_seq_len=config.gen_response_len)
 
     def forward(self, histories, segments, responses, decode=False):

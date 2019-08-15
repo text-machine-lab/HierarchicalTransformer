@@ -31,13 +31,24 @@ alert = tgalert.TelegramAlert()
 
 word2vec_path = "../datasets/GoogleNews-vectors-negative300.bin"
 
+class MyDataParallel(torch.nn.DataParallel):
+    """
+    Allow nn.DataParallel to call model's attributes.
+    """
+    def __getattr__(self, name):
+        try:
+            return super().__getattr__(name)
+        except AttributeError:
+            return getattr(self.module, name)
+
 class Solver(object):
-    def __init__(self, config, train_data_loader, eval_data_loader, vocab, is_train=True, model=None):
+    def __init__(self, config, train_data_loader, eval_data_loader, vocab, is_train=True, model=None, parallel=True):
         self.config = config
         self.epoch_i = 0
         self.train_data_loader = train_data_loader
         self.eval_data_loader = eval_data_loader
         self.vocab = vocab
+        self.parallel = parallel
         self.is_train = is_train
         self.model = model
         # new code to run Tensorboard
@@ -86,6 +97,7 @@ class Solver(object):
             self.load_model(self.config.checkpoint)
 
         if self.is_train:
+            # TODO restore scheduled learning rate! or decide you don't want it
             if isinstance(self.model, TRANSFORMER):
 
                 self.optimizer = ScheduledOptim(
@@ -283,8 +295,6 @@ class Solver(object):
 
                     gold = self.add_sos(target_sentences)  # concat start of sequence token as input
 
-                    # TODO here print history, response and gold
-
                     sentence_logits = self.model(input_histories, history_segments, gold, decode=False)
 
                     response_loss, n_words = masked_cross_entropy(
@@ -304,6 +314,7 @@ class Solver(object):
 
                     # Run optimizer
                     self.optimizer.step_and_update_lr()
+                    #self.optimizer.step()
 
                     # calculate the batch loss and word count across all responses
                     batch_loss = np.sum(response_losses)
