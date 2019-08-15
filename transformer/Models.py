@@ -327,6 +327,7 @@ class MultiHeadAttentionGRU(nn.Module):
     def __init__(self, n_tgt_vocab, d_model, d_k=64, d_v=64, n_head=8, dropout=0.1):
         super().__init__()
 
+        print('Using GRU!!!!')
         self.tgt_word_emb = nn.Embedding(
             n_tgt_vocab, d_model, padding_idx=Constants.PAD)
 
@@ -343,23 +344,24 @@ class MultiHeadAttentionGRU(nn.Module):
 
         gru_outputs = []
         dec_attns = []
+        gru_output = word_input[:, 0, :].unsqueeze(1)
         for t in range(word_input.shape[1]):
             word_emb = word_input[:, t, :]
             word_emb = word_emb.unsqueeze(1) # b x 1 x d
             step_mask = dec_enc_attn_mask[:, t, :].unsqueeze(1)
             # we perform attention over the encoder
-            attn_vec, attn = self.enc_attn(word_emb, enc_output, enc_output, mask=step_mask)
+            attn_vec, attn = self.enc_attn(gru_output, enc_output, enc_output, mask=step_mask)
             # we concatenate word and attention vector
             gru_input = torch.cat([word_emb, attn_vec], 2) # b x 1 x 2d
             # run GRU step to get output
-            gru_output = self.gru(gru_input)[0].squeeze(1)
+            gru_output = self.gru(gru_input)[0]
             # add output to list
             gru_outputs.append(gru_output)
             # save attention maps for viewing
             dec_attns.append(attn)
 
         # concatenate all outputs
-        outs = torch.stack(gru_outputs, 1)
+        outs = torch.cat(gru_outputs, 1)
         if return_attns:
             return outs, None, dec_attns  # None because GRU does not do attention over itself
         return outs,

@@ -79,8 +79,9 @@ class Solver(object):
         if not self.config.tg_enable:
             alert.disable = True
 
-        self.writer = SummaryWriter('logdir/' + str(datetime.datetime.now()) + '-'
-                                    + str(type(self.model)) + '-' + str(self.config.n_epoch) +'epochs' + '-' + str(len(self.train_data_loader)) + 'batches')
+        self.writer = SummaryWriter('logdir/' + str(datetime.datetime.now()) + '-model='
+                                    + str(type(self.model)) + '-epochs=' + str(self.config.n_epoch) +
+                                    '-batches=' + str(len(self.train_data_loader)) + '-unet=' + str(self.config.unet))
 
         n_params = sum([param.numel() for param in self.model.parameters()])
         print('Number of parameters: %s' % n_params)
@@ -98,18 +99,18 @@ class Solver(object):
 
         if self.is_train:
             # TODO restore scheduled learning rate! or decide you don't want it
-            if isinstance(self.model, TRANSFORMER):
-
-                self.optimizer = ScheduledOptim(
-                    optim.Adam(
-                        filter(lambda x: x.requires_grad, self.model.parameters()),
-                        betas=(0.9, 0.98), eps=1e-09),
-                    self.config.encoder_hidden_size, self.config.n_warmup_steps, lr_factor=self.config.learning_rate)
-
-            else:
-                self.optimizer = self.config.optimizer(
-                    filter(lambda p: p.requires_grad, self.model.parameters()),
-                    lr=self.config.learning_rate)
+            # if isinstance(self.model, TRANSFORMER):
+            #
+            #     self.optimizer = ScheduledOptim(
+            #         optim.Adam(
+            #             filter(lambda x: x.requires_grad, self.model.parameters()),
+            #             betas=(0.9, 0.98), eps=1e-09),
+            #         self.config.encoder_hidden_size, self.config.n_warmup_steps, lr_factor=self.config.learning_rate)
+            #
+            # else:
+            self.optimizer = self.config.optimizer(
+                filter(lambda p: p.requires_grad, self.model.parameters()),
+                lr=self.config.learning_rate)
 
     def save_model(self, epoch):
         """Save parameters to checkpoint"""
@@ -278,8 +279,9 @@ class Solver(object):
                     self.writer.add_scalar('output_size', target_sentences.numel(), tb_idx)
 
                     # divide by zero error on first batch
-                    if batch_i > 0:
-                        self.writer.add_scalar('learning_rate', self.optimizer.init_lr * self.optimizer._get_lr_scale(), tb_idx)
+                    # TODO uncomment this
+                    #if batch_i > 0:
+                    #    self.writer.add_scalar('learning_rate', self.optimizer.init_lr * self.optimizer._get_lr_scale(), tb_idx)
 
                     # # manually flush writer after each iteration
                     # for writer in self.writer.all_writers.values():
@@ -313,8 +315,9 @@ class Solver(object):
                     self.writer.add_scalar('grad_norm', norm, tb_idx)
 
                     # Run optimizer
-                    self.optimizer.step_and_update_lr()
-                    #self.optimizer.step()
+                    # TODO bring back schedule optimizer
+                    #self.optimizer.step_and_update_lr()
+                    self.optimizer.step()
 
                     # calculate the batch loss and word count across all responses
                     batch_loss = np.sum(response_losses)
