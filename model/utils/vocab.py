@@ -120,7 +120,6 @@ class Vocab(object):
             return list(list_like.numpy())
 
     def id2sent(self, id_list, stop_at_eos=True):
-        # TODO change this back to stop at EOS token!!
         """list of id => list of tokens (Single sentence)"""
         id_list = self.to_list(id_list)
         sentence = []

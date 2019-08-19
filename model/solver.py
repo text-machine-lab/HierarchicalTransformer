@@ -174,7 +174,6 @@ class Solver(object):
     #     conversations_pad = [convo + [empty] * (max_convo_len - len(convo)) for convo in conversations]
     #     t_convos = to_var(torch.LongTensor(conversations_pad))
     #     t_sent_lens = torch.sum((t_convos != 0).long(), 2)
-    #     # TODO it's a problem that batches are not i.i.d
     #     # it starts at 1 because the baseline models also don't predict the first response
     #     # for r_idx in range(1, max_convo_len):
     #     return t_convos, t_sent_lens
@@ -197,6 +196,9 @@ class Solver(object):
     def extract_history_response(self, conversations):
         input_histories_ls = [conv[:i] for conv in conversations for i in range(1, len(conv))]
         target_sentences = [conv[i] for conv in conversations for i in range(1, len(conv))]
+        input_sentences = [conv[i-1] for conv in conversations for i in range(1, len(conv))]
+
+        input_conversation_length = [len(conversations[i]) - 1 for i in range(len(conversations))]
 
         input_histories_joined = [[token for sentence in history for token in sentence if token != 0]
                                   for history in input_histories_ls]
@@ -210,17 +212,22 @@ class Solver(object):
                                   for history in input_history_segs]
 
         # we shuffle in case examples are removed from the end to fit memory requirements
-        pairs = list(zip(input_histories_padded, input_history_segs_padded, target_sentences))
-        random.shuffle(pairs)
-        input_histories_shuf = [pair[0] for pair in pairs]
-        input_history_segs_shuf = [pair[1] for pair in pairs]
-        target_sentences_shuf = [pair[2] for pair in pairs]
+        pairs = list(zip(input_histories_padded, input_history_segs_padded, target_sentences, input_sentences))
+        #random.shuffle(pairs)
+        # input_histories_shuf = [pair[0] for pair in pairs]
+        # input_history_segs_shuf = [pair[1] for pair in pairs]
+        # target_sentences_shuf = [pair[2] for pair in pairs]
+        # input_sentences_shuf = [pair[3] for pair in pairs]
+        # input_conversation_length_shuf = [pair[4] for pair in pairs]
+        input_histories_shuf, input_history_segs_shuf, target_sentences_shuf, input_sentences_shuf = zip(*pairs)
 
         input_histories = to_var(torch.LongTensor(input_histories_shuf))
         target_sentences = to_var(torch.LongTensor(target_sentences_shuf))
+        input_sentences = to_var(torch.LongTensor(input_sentences_shuf))
         history_segments = to_var(torch.LongTensor(input_history_segs_shuf))
+        conv_lens = to_var(torch.LongTensor(input_conversation_length))
 
-        return input_histories, history_segments, target_sentences
+        return input_histories, history_segments, target_sentences, input_sentences, conv_lens
 
     def add_sos(self, x):
         sos_id = torch.tensor(SOS_ID).to(x.device).view(1, 1).expand(x.shape[0], -1)
@@ -231,13 +238,12 @@ class Solver(object):
     def train(self):
         epoch_loss_history = []
 
-        print('\n<Validation before training>...')
-        self.validation_loss = self.evaluate()
+        #print('\n<Validation before training>...')
+        #self.validation_loss = self.evaluate()
 
         for epoch_i in range(self.epoch_i, self.config.n_epoch):
             self.epoch_i = epoch_i
             batch_loss_history = []
-            self.model.train()
             n_total_words = 0
             prev_loss = None
             for batch_i, (conversations, conversation_length, sentence_length) in enumerate(tqdm(self.train_data_loader, ncols=80)):
@@ -247,32 +253,32 @@ class Solver(object):
                 # conversation_length: list of int
                 # sentence_length: (batch_size) list of conversation list of sentence_lengths
 
+                for c in range(len(conversations)):
+                    assert len(conversations[c]) == conversation_length[c]
+
                 tb_idx = len(self.train_data_loader) * epoch_i + batch_i  # always increments on every loop
 
+                input_histories, history_segments, target_sentences, input_sentences, input_conversation_length \
+                    = self.extract_history_response(conversations)
+
+                target_sentence_length = (target_sentences != 0).long().sum(1)
+                input_sentence_length = (input_sentences != 0).long().sum(1)
+
+
+                self.model.train()
+                self.optimizer.zero_grad()
+
                 if isinstance(self.model, TRANSFORMER):
-                    # here we generate each response separately and perform separate updates
-                    response_losses = []
-                    response_words = []
 
                     # TODO do another run through the code to make sure loss calculation is correct
-                    # start from index 1, as HRED and other models do not predict the first sentence
-                    # input_histories_ls = [conv[:i] for conv in conversations for i in range(1, len(conv))]
-                    # target_sentences = [conv[i] for conv in conversations for i in range(1, len(conv))]
-                    #
-                    # input_histories_joined = [[token for sentence in history for token in sentence if token != 0]
-                    #                                  for history in input_histories_ls]
-                    # max_history_len = max([len(history) for history in input_histories_joined])
-                    # input_histories_padded = [history + [0] * (max_history_len - len(history))
-                    #                                  for history in input_histories_joined]
-                    #
-                    # input_histories = to_var(torch.LongTensor(input_histories_padded))
-                    # target_sentences = to_var(torch.LongTensor(target_sentences))
-                    input_histories, history_segments, target_sentences = self.extract_history_response(conversations)
+
+
 
                     # this can protect against random memory shortages
-                    input_histories = input_histories[:self.config.max_convo_len, :self.config.max_unroll]
-                    history_segments = history_segments[:self.config.max_convo_len, :self.config.max_unroll]
-                    target_sentences = target_sentences[:self.config.max_convo_len, :self.config.max_unroll]
+                    # TODO reinstate upper bounds on conversation size
+                    #input_histories = input_histories[:self.config.max_convo_len, :self.config.max_unroll]
+                    #history_segments = history_segments[:self.config.max_convo_len, :self.config.max_unroll]
+                    #target_sentences = target_sentences[:self.config.max_convo_len, :self.config.max_unroll]
 
                     self.writer.add_scalar('batch_size', input_histories.shape[0], tb_idx)
                     self.writer.add_scalar('history_len', input_histories.shape[1], tb_idx)
@@ -283,68 +289,50 @@ class Solver(object):
                     #if batch_i > 0:
                     #    self.writer.add_scalar('learning_rate', self.optimizer.init_lr * self.optimizer._get_lr_scale(), tb_idx)
 
-                    # # manually flush writer after each iteration
-                    # for writer in self.writer.all_writers.values():
-                    #     writer.flush()
-
-                    sentence_lens = (target_sentences != 0).long().sum(1)
-
-                    #convos, sent_lens = self.format_convos_for_transformer(conversations)
-                    #r_idx = random.randint(1, convos.shape[1] - 1)
-                    #histories, responses = self.extract_history_response(convos, r_idx)
-
-                    self.optimizer.zero_grad()
-
                     gold = self.add_sos(target_sentences)  # concat start of sequence token as input
 
                     sentence_logits = self.model(input_histories, history_segments, gold, decode=False)
 
-                    response_loss, n_words = masked_cross_entropy(
-                        sentence_logits,
-                        target_sentences,
-                        sentence_lens)
-
-                    response_losses.append(response_loss.item())
-                    response_words.append(n_words)
-
-                    # Back-propagation
-                    response_loss.backward()
-
-                    # Gradient cliping
-                    norm = torch.nn.utils.clip_grad_norm_(self.model.parameters(), self.config.clip)
-                    self.writer.add_scalar('grad_norm', norm, tb_idx)
-
-                    # Run optimizer
-                    # TODO bring back schedule optimizer
-                    #self.optimizer.step_and_update_lr()
-                    self.optimizer.step()
-
-                    # calculate the batch loss and word count across all responses
-                    batch_loss = np.sum(response_losses)
-                    n_words = np.sum(response_words)
+                    # batch_loss, n_words = masked_cross_entropy(
+                    #     sentence_logits,
+                    #     target_sentences,
+                    #     sentence_lens)
+                    #
+                    # # Back-propagation
+                    # batch_loss.backward()
+                    #
+                    # # Gradient cliping
+                    # norm = torch.nn.utils.clip_grad_norm_(self.model.parameters(), self.config.clip)
+                    # self.writer.add_scalar('grad_norm', norm, tb_idx)
+                    #
+                    # # Run optimizer
+                    # # TODO bring back schedule optimizer
+                    # #self.optimizer.step_and_update_lr()
+                    # self.optimizer.step()
 
                 else:
 
                     ######## FOR TRAINING ALL BASELINES ##############
 
-                    input_conversations = [conv[:-1] for conv in conversations]
-                    target_conversations = [conv[1:] for conv in conversations]
-
-                    # flatten input and target conversations
-                    input_sentences = [sent for conv in input_conversations for sent in conv]
-                    target_sentences = [sent for conv in target_conversations for sent in conv]
-                    input_sentence_length = [l for len_list in sentence_length for l in len_list[:-1]]
-                    target_sentence_length = [l for len_list in sentence_length for l in len_list[1:]]
-                    input_conversation_length = [l - 1 for l in conversation_length]
-
-                    input_sentences = to_var(torch.LongTensor(input_sentences))
-                    target_sentences = to_var(torch.LongTensor(target_sentences))
-                    input_sentence_length = to_var(torch.LongTensor(input_sentence_length))
-                    target_sentence_length = to_var(torch.LongTensor(target_sentence_length))
-                    input_conversation_length = to_var(torch.LongTensor(input_conversation_length))
+                    # input_conversations = [conv[:-1] for conv in conversations]
+                    # target_conversations = [conv[1:] for conv in conversations]
+                    #
+                    # # flatten input and target conversations
+                    # input_sentences = [sent for conv in input_conversations for sent in conv]
+                    # target_sentences = [sent for conv in target_conversations for sent in conv]
+                    # input_sentence_length = [l for len_list in sentence_length for l in len_list[:-1]]
+                    # #target_sentence_length = [l for len_list in sentence_length for l in len_list[1:]]
+                    # input_conversation_length = [l - 1 for l in conversation_length]
+                    #
+                    # input_sentences = to_var(torch.LongTensor(input_sentences))
+                    # target_sentences = to_var(torch.LongTensor(target_sentences))
+                    # input_sentence_length = to_var(torch.LongTensor(input_sentence_length))
+                    # #target_sentence_length = to_var(torch.LongTensor(target_sentence_length))
+                    # input_conversation_length = to_var(torch.LongTensor(input_conversation_length))
+                    #
+                    # target_sentence_length = (target_sentences != 0).long().sum(1)
 
                     # reset gradient
-                    self.optimizer.zero_grad()
 
                     sentence_logits = self.model(
                         input_sentences,
@@ -353,21 +341,21 @@ class Solver(object):
                         target_sentences,
                         decode=False)
 
-                    batch_loss, n_words = masked_cross_entropy(
-                        sentence_logits,
-                        target_sentences,
-                        target_sentence_length)
+                batch_loss, n_words = masked_cross_entropy(
+                    sentence_logits,
+                    target_sentences,
+                    target_sentence_length)
 
-                    # Back-propagation
-                    batch_loss.backward()
+                # Back-propagation
+                batch_loss.backward()
 
-                    # Gradient cliping
-                    norm = torch.nn.utils.clip_grad_norm_(self.model.parameters(), self.config.clip)
+                # Gradient cliping
+                norm = torch.nn.utils.clip_grad_norm_(self.model.parameters(), self.config.clip)
 
-                    self.writer.add_scalar('grad_norm', norm, tb_idx)
+                self.writer.add_scalar('grad_norm', norm, tb_idx)
 
-                    # Run optimizer
-                    self.optimizer.step()
+                # Run optimizer
+                self.optimizer.step()
 
                 assert not isnan(batch_loss.item())
                 batch_loss_history.append(batch_loss.item())
@@ -472,45 +460,47 @@ class Solver(object):
             # sentence_length: (batch_size) list of conversation list of sentence_lengths
 
             with torch.no_grad():
-                if isinstance(self.model, TRANSFORMER):
-                    pass
 
-                    input_histories, history_segments, target_sentences = self.extract_history_response(conversations)
+                input_histories, history_segments, target_sentences, input_sentences, input_conversation_length \
+                    = self.extract_history_response(conversations)
+
+                target_sentence_length = (target_sentences != 0).long().sum(1)
+                input_sentence_length = (input_sentences != 0).long().sum(1)
+
+                if isinstance(self.model, TRANSFORMER):
 
                     # this can protect against random memory shortages
-                    input_histories = input_histories[:self.config.max_convo_len, :self.config.max_unroll]
-                    history_segments = history_segments[:self.config.max_convo_len, :self.config.max_unroll]
-                    target_sentences = target_sentences[:self.config.max_convo_len, :self.config.max_unroll]
-
-                    sentence_lens = (target_sentences != 0).long().sum(1)
+                    # input_histories = input_histories[:self.config.max_convo_len, :self.config.max_unroll]
+                    # history_segments = history_segments[:self.config.max_convo_len, :self.config.max_unroll]
+                    # target_sentences = target_sentences[:self.config.max_convo_len, :self.config.max_unroll]
 
                     gold = self.add_sos(target_sentences)
 
                     sentence_logits = self.model(input_histories, history_segments, gold, decode=False)
 
-                    batch_loss, n_words = masked_cross_entropy(sentence_logits, target_sentences, sentence_lens)
+                    #batch_loss, n_words = masked_cross_entropy(sentence_logits, target_sentences, sentence_lens)
 
                     if batch_i == 0:
                         self.generate_transformer_sentence(input_histories, history_segments, target_sentences)
 
                 else:
-                    input_conversations = [conv[:-1] for conv in conversations]
-                    target_conversations = [conv[1:] for conv in conversations]
-
-                    # flatten input and target conversations
-                    input_sentences = [sent for conv in input_conversations for sent in conv]
-                    target_sentences = [sent for conv in target_conversations for sent in conv]
-                    input_sentence_length = [l for len_list in sentence_length for l in len_list[:-1]]
-                    target_sentence_length = [l for len_list in sentence_length for l in len_list[1:]]
-                    input_conversation_length = [l - 1 for l in conversation_length]
-
-
-                    input_sentences = to_var(torch.LongTensor(input_sentences))
-                    target_sentences = to_var(torch.LongTensor(target_sentences))
-                    input_sentence_length = to_var(torch.LongTensor(input_sentence_length))
-                    target_sentence_length = to_var(torch.LongTensor(target_sentence_length))
-                    input_conversation_length = to_var(
-                        torch.LongTensor(input_conversation_length))
+                    # input_conversations = [conv[:-1] for conv in conversations]
+                    # target_conversations = [conv[1:] for conv in conversations]
+                    #
+                    # # flatten input and target conversations
+                    # input_sentences = [sent for conv in input_conversations for sent in conv]
+                    # target_sentences = [sent for conv in target_conversations for sent in conv]
+                    # input_sentence_length = [l for len_list in sentence_length for l in len_list[:-1]]
+                    # target_sentence_length = [l for len_list in sentence_length for l in len_list[1:]]
+                    # input_conversation_length = [l - 1 for l in conversation_length]
+                    #
+                    #
+                    # input_sentences = to_var(torch.LongTensor(input_sentences))
+                    # target_sentences = to_var(torch.LongTensor(target_sentences))
+                    # input_sentence_length = to_var(torch.LongTensor(input_sentence_length))
+                    # target_sentence_length = to_var(torch.LongTensor(target_sentence_length))
+                    # input_conversation_length = to_var(
+                    #     torch.LongTensor(input_conversation_length))
 
                     if batch_i == 0:
                         self.generate_sentence(input_sentences,
@@ -524,10 +514,10 @@ class Solver(object):
                         input_conversation_length,
                         target_sentences)
 
-                    batch_loss, n_words = masked_cross_entropy(
-                        sentence_logits,
-                        target_sentences,
-                        target_sentence_length)
+                batch_loss, n_words = masked_cross_entropy(
+                    sentence_logits,
+                    target_sentences,
+                    target_sentence_length)
 
             assert not isnan(batch_loss.item())
             batch_loss_history.append(batch_loss.item())

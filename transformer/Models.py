@@ -323,7 +323,21 @@ class Decoder(nn.Module):
         return dec_output,
 
 
-class MultiHeadAttentionGRU(nn.Module):
+class GRUEncoder(nn.Module):
+    def __init__(self, n_src_vocab, d_model):
+        super().__init__()
+        self.src_word_emb = nn.Embedding(n_src_vocab, d_model, padding_idx=Constants.PAD)
+        self.gru = nn.GRU(d_model, d_model, batch_first=True)
+
+    def forward(self, src_seq, src_pos=None, src_segs=None):
+        non_pad_mask = get_non_pad_mask(src_seq)  # b x t
+        src_embs = self.src_word_emb(src_seq)  # b x t x d
+        gru_output, _ = self.gru(src_embs)
+        gru_output = gru_output * non_pad_mask
+
+        return gru_output,
+
+class MultiHeadAttentionGRUDecoder(nn.Module):
     def __init__(self, n_tgt_vocab, d_model, d_k=64, d_v=64, n_head=8, dropout=0.1):
         super().__init__()
 
@@ -443,12 +457,14 @@ class UNetTransformer(nn.Module):
         self.len_max_seq = len_max_seq
         # this is the major modification of the project
         encoder_type = Encoder if not unet else UNetEncoder
+        #
+        # self.encoder = encoder_type(
+        #     n_src_vocab=n_src_vocab, len_max_seq=len_max_seq,
+        #     d_word_vec=d_word_vec, d_model=d_model, d_inner=d_inner,
+        #     n_layers=n_layers, n_head=n_head, d_k=d_k, d_v=d_v,
+        #     dropout=dropout)
 
-        self.encoder = encoder_type(
-            n_src_vocab=n_src_vocab, len_max_seq=len_max_seq,
-            d_word_vec=d_word_vec, d_model=d_model, d_inner=d_inner,
-            n_layers=n_layers, n_head=n_head, d_k=d_k, d_v=d_v,
-            dropout=dropout)
+        self.encoder = GRUEncoder(n_src_vocab, d_model)
 
         # self.decoder = Decoder(
         #     n_tgt_vocab=n_tgt_vocab, len_max_seq=len_max_seq,
@@ -458,7 +474,7 @@ class UNetTransformer(nn.Module):
 
         # TODO determine if this decoder helps performance!
         # for conversation, we use a GRU decoder instead
-        self.decoder = MultiHeadAttentionGRU(n_tgt_vocab, d_model, d_k, d_v, n_head, dropout=dropout)
+        self.decoder = MultiHeadAttentionGRUDecoder(n_tgt_vocab, d_model, d_k, d_v, n_head, dropout=dropout)
 
         self.tgt_word_prj = nn.Linear(d_model, n_tgt_vocab, bias=False)
         nn.init.xavier_normal_(self.tgt_word_prj.weight)

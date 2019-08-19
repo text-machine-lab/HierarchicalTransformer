@@ -117,7 +117,6 @@ class HRED(nn.Module):
         # pad and pack encoder_hidden
         start = torch.cumsum(torch.cat((to_var(input_conversation_length.data.new(1).zero_()),
                                         input_conversation_length[:-1])), 0)
-
         # encoder_hidden: [batch_size, max_len, num_layers * direction * hidden_size]
         encoder_hidden = torch.stack([pad(encoder_hidden.narrow(0, s, l), max_len)
                                       for s, l in zip(start.data.tolist(),
