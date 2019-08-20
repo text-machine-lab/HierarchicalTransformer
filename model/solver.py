@@ -264,82 +264,24 @@ class Solver(object):
                 target_sentence_length = (target_sentences != 0).long().sum(1)
                 input_sentence_length = (input_sentences != 0).long().sum(1)
 
+                self.writer.add_scalar('batch_size', input_histories.shape[0], tb_idx)
+                self.writer.add_scalar('history_len', input_histories.shape[1], tb_idx)
+                self.writer.add_scalar('output_size', target_sentences.numel(), tb_idx)
 
                 self.model.train()
                 self.optimizer.zero_grad()
 
                 if isinstance(self.model, TRANSFORMER):
-
-                    # TODO do another run through the code to make sure loss calculation is correct
-
-
-
                     # this can protect against random memory shortages
                     # TODO reinstate upper bounds on conversation size
                     #input_histories = input_histories[:self.config.max_convo_len, :self.config.max_unroll]
                     #history_segments = history_segments[:self.config.max_convo_len, :self.config.max_unroll]
                     #target_sentences = target_sentences[:self.config.max_convo_len, :self.config.max_unroll]
 
-                    self.writer.add_scalar('batch_size', input_histories.shape[0], tb_idx)
-                    self.writer.add_scalar('history_len', input_histories.shape[1], tb_idx)
-                    self.writer.add_scalar('output_size', target_sentences.numel(), tb_idx)
-
-                    # divide by zero error on first batch
-                    # TODO uncomment this
-                    #if batch_i > 0:
-                    #    self.writer.add_scalar('learning_rate', self.optimizer.init_lr * self.optimizer._get_lr_scale(), tb_idx)
-
                     gold = self.add_sos(target_sentences)  # concat start of sequence token as input
-
                     sentence_logits = self.model(input_histories, history_segments, gold, decode=False)
-
-                    # batch_loss, n_words = masked_cross_entropy(
-                    #     sentence_logits,
-                    #     target_sentences,
-                    #     sentence_lens)
-                    #
-                    # # Back-propagation
-                    # batch_loss.backward()
-                    #
-                    # # Gradient cliping
-                    # norm = torch.nn.utils.clip_grad_norm_(self.model.parameters(), self.config.clip)
-                    # self.writer.add_scalar('grad_norm', norm, tb_idx)
-                    #
-                    # # Run optimizer
-                    # # TODO bring back schedule optimizer
-                    # #self.optimizer.step_and_update_lr()
-                    # self.optimizer.step()
-
                 else:
-
-                    ######## FOR TRAINING ALL BASELINES ##############
-
-                    # input_conversations = [conv[:-1] for conv in conversations]
-                    # target_conversations = [conv[1:] for conv in conversations]
-                    #
-                    # # flatten input and target conversations
-                    # input_sentences = [sent for conv in input_conversations for sent in conv]
-                    # target_sentences = [sent for conv in target_conversations for sent in conv]
-                    # input_sentence_length = [l for len_list in sentence_length for l in len_list[:-1]]
-                    # #target_sentence_length = [l for len_list in sentence_length for l in len_list[1:]]
-                    # input_conversation_length = [l - 1 for l in conversation_length]
-                    #
-                    # input_sentences = to_var(torch.LongTensor(input_sentences))
-                    # target_sentences = to_var(torch.LongTensor(target_sentences))
-                    # input_sentence_length = to_var(torch.LongTensor(input_sentence_length))
-                    # #target_sentence_length = to_var(torch.LongTensor(target_sentence_length))
-                    # input_conversation_length = to_var(torch.LongTensor(input_conversation_length))
-                    #
-                    # target_sentence_length = (target_sentences != 0).long().sum(1)
-
-                    # reset gradient
-
-                    sentence_logits = self.model(
-                        input_sentences,
-                        input_sentence_length,
-                        input_conversation_length,
-                        target_sentences,
-                        decode=False)
+                    sentence_logits = self.model(input_sentences, input_sentence_length, input_conversation_length, target_sentences, decode=False)
 
                 batch_loss, n_words = masked_cross_entropy(
                     sentence_logits,

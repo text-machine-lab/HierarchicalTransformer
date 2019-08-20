@@ -11,6 +11,15 @@ from transformer.SubLayers import MultiHeadAttention
 
 __author__ = "Yu-Hsiang Huang"
 
+def batched_index_select(input, dim, index):
+    views = [input.shape[0]] + \
+		[1 if i != dim else -1 for i in torch.arange(1, len(input.shape))]
+    expanse = list(input.shape)
+    expanse[0] = -1
+    expanse[dim] = -1
+    index = index.view(views).expand(expanse)
+    return torch.gather(input, dim, index)
+
 def get_non_pad_mask(seq):
     assert seq.dim() == 2
     return seq.ne(Constants.PAD).type(torch.float).unsqueeze(-1)
@@ -356,19 +365,24 @@ class MultiHeadAttentionGRUDecoder(nn.Module):
         # we calculate attention mask for padding purposes
         dec_enc_attn_mask = get_attn_key_pad_mask(seq_k=src_seq, seq_q=tgt_seq)
 
+        # here we grab final states of encoder output
+
+        final_state_idx = (tgt_seq != 0).sum(1) - 1
+        final_states = batched_index_select(enc_output, 1, final_state_idx)
+
         gru_outputs = []
         dec_attns = []
-        gru_output = word_input[:, 0, :].unsqueeze(1)
+        gru_output = final_states  # word_input[:, 0, :].unsqueeze(1)
         for t in range(word_input.shape[1]):
             word_emb = word_input[:, t, :]
             word_emb = word_emb.unsqueeze(1) # b x 1 x d
-            step_mask = dec_enc_attn_mask[:, t, :].unsqueeze(1)
+            step_mask = dec_enc_attn_mask[:, t, :].unsqueeze(1)  #TODO inspect this
             # we perform attention over the encoder
             attn_vec, attn = self.enc_attn(gru_output, enc_output, enc_output, mask=step_mask)
             # we concatenate word and attention vector
             gru_input = torch.cat([word_emb, attn_vec], 2) # b x 1 x 2d
             # run GRU step to get output
-            gru_output = self.gru(gru_input)[0]
+            gru_output = self.gru(gru_input, gru_output.squeeze(1).unsqueeze(0))[0]
             # add output to list
             gru_outputs.append(gru_output)
             # save attention maps for viewing
@@ -449,7 +463,7 @@ class UNetTransformer(nn.Module):
             self,
             n_src_vocab, n_tgt_vocab, len_max_seq,
             d_word_vec=512, d_model=512, d_inner=2048,
-            n_layers=6, n_head=8, d_k=64, d_v=64, dropout=0.1,
+            n_layers=6, n_head=4, d_k=128, d_v=128, dropout=0.1,
             tgt_emb_prj_weight_sharing=True,
             emb_src_tgt_weight_sharing=True, unet=True):
 
