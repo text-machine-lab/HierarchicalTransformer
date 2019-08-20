@@ -6,8 +6,9 @@ import numpy as np
 import sys
 sys.path.append('..') # ASSUMPTION - THIS MODULE LIES IN DIR NEXT TO TRANSFORMER DIR
 import random
-from transformer.Models import Transformer, UNetTransformer
+from transformer.Models import Transformer, UNetTransformer, GRUEncoder, MultiHeadAttentionGRUDecoder
 from transformer.Translator import Translator
+from transformer.Models import batched_index_select
 from model.utils.vocab import SOS_ID
 
 VariationalModels = ['VHRED', 'VHCR']
@@ -65,22 +66,26 @@ class HRED(nn.Module):
         super(HRED, self).__init__()
 
         self.config = config
-        self.encoder = layers.EncoderRNN(config.vocab_size,
-                                         config.embedding_size,
-                                         config.encoder_hidden_size,
-                                         config.rnn,
-                                         config.num_layers,
-                                         config.bidirectional,
-                                         config.dropout)
+        # TODO revert to HRED encoder
+        print('Using local GRU encoder instead')
+        # self.encoder = layers.EncoderRNN(config.vocab_size,
+        #                                  config.embedding_size,
+        #                                  config.encoder_hidden_size,
+        #                                  config.rnn,
+        #                                  config.num_layers,
+        #                                  config.bidirectional,
+        #                                  config.dropout)
 
-        context_input_size = (config.num_layers
-                              * config.encoder_hidden_size
-                              * self.encoder.num_directions)
-        self.context_encoder = layers.ContextRNN(context_input_size,
-                                                 config.context_size,
-                                                 config.rnn,
-                                                 config.num_layers,
-                                                 config.dropout)
+        self.encoder = GRUEncoder(config.vocab_size, config.encoder_hidden_size)
+
+        # context_input_size = (config.num_layers
+        #                       * config.encoder_hidden_size
+        #                       * self.encoder.num_directions)
+        # self.context_encoder = layers.ContextRNN(context_input_size,
+        #                                          config.context_size,
+        #                                          config.rnn,
+        #                                          config.num_layers,
+        #                                          config.dropout)
 
         self.decoder = layers.DecoderRNN(config.vocab_size,
                                          config.embedding_size,
@@ -126,11 +131,13 @@ class HRED(nn.Module):
         #encoder_outputs, encoder_hidden = self.encoder(input_sentences,
         #                                               input_sentence_length)
 
-        history_length = (histories != 0).sum(1)
-        encoder_outputs, encoder_hidden = self.encoder(histories, history_length)
+        history_length = (histories != 0).sum(1) - 1
+        #encoder_outputs, encoder_hidden = self.encoder(histories, history_length)
+        encoder_outputs, = self.encoder(histories)
+        encoder_hidden = batched_index_select(encoder_outputs, 1, history_length).unsqueeze(1)
 
         # encoder_hidden: [num_sentences, num_layers * direction * hidden_size]
-        encoder_hidden = encoder_hidden.transpose(1, 0).contiguous().view(num_sentences, -1)
+        #encoder_hidden = encoder_hidden.transpose(1, 0).contiguous().view(num_sentences, -1)
 
         # pad and pack encoder_hidden
         #start = torch.cumsum(torch.cat((to_var(input_conversation_length.data.new(1).zero_()),

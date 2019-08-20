@@ -337,6 +337,7 @@ class GRUEncoder(nn.Module):
     def __init__(self, n_src_vocab, d_model):
         super().__init__()
         self.src_word_emb = nn.Embedding(n_src_vocab, d_model, padding_idx=Constants.PAD)
+        self.embedding = self.src_word_emb
         self.gru = nn.GRU(d_model, d_model, batch_first=True)
 
     def forward(self, src_seq, src_pos=None, src_segs=None):

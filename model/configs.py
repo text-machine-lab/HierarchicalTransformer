@@ -118,7 +118,7 @@ def get_config(parse=True, **optional_kwargs):
     parser.add_argument('--encoder_hidden_size', type=int, default=1000)
     parser.add_argument('--bidirectional', type=str2bool, default=True)
     parser.add_argument('--decoder_hidden_size', type=int, default=1000)
-    parser.add_argument('--dropout', type=float, default=0.2)
+    parser.add_argument('--dropout', type=float, default=0.0)
     parser.add_argument('--context_size', type=int, default=1000)
     parser.add_argument('--feedforward', type=str, default='FeedForward')
     parser.add_argument('--activation', type=str, default='Tanh')
