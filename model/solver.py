@@ -229,11 +229,6 @@ class Solver(object):
 
         return input_histories, history_segments, target_sentences, input_sentences, conv_lens
 
-    def add_sos(self, x):
-        sos_id = torch.tensor(SOS_ID).to(x.device).view(1, 1).expand(x.shape[0], -1)
-        gold = torch.cat([sos_id, x], 1)
-        return gold
-
     @time_desc_decorator('Training Start!')
     def train(self):
         epoch_loss_history = []
@@ -271,17 +266,18 @@ class Solver(object):
                 self.model.train()
                 self.optimizer.zero_grad()
 
-                if isinstance(self.model, TRANSFORMER):
+                #if isinstance(self.model, TRANSFORMER):
                     # this can protect against random memory shortages
                     # TODO reinstate upper bounds on conversation size
                     #input_histories = input_histories[:self.config.max_convo_len, :self.config.max_unroll]
                     #history_segments = history_segments[:self.config.max_convo_len, :self.config.max_unroll]
                     #target_sentences = target_sentences[:self.config.max_convo_len, :self.config.max_unroll]
 
-                    gold = self.add_sos(target_sentences)  # concat start of sequence token as input
-                    sentence_logits = self.model(input_histories, history_segments, gold, decode=False)
-                else:
-                    sentence_logits = self.model(input_sentences, input_sentence_length, input_conversation_length, target_sentences, decode=False)
+                sentence_logits = self.model(input_histories, history_segments, target_sentences, decode=False)
+                #else:
+                #    # TODO change back to original HRED inputs
+                #    sentence_logits = self.model(input_histories, target_sentences, decode=False)
+                    #sentence_logits = self.model(input_sentences, input_sentence_length, input_conversation_length, target_sentences, decode=False)
 
                 batch_loss, n_words = masked_cross_entropy(
                     sentence_logits,
@@ -366,10 +362,10 @@ class Solver(object):
     def generate_transformer_sentence(self, input_histories, history_segments, target_sentences):
         self.model.eval()
 
-        gold = self.add_sos(target_sentences)
+        #gold = self.add_sos(target_sentences)
 
         # [batch_size, max_seq_len, vocab_size]
-        generated_sentences = self.model(input_histories, history_segments, gold, decode=True)
+        generated_sentences = self.model(input_histories, history_segments, target_sentences, decode=True)
 
         # write output to file
         with open(os.path.join(self.config.save_path, 'samples.txt'), 'a') as f:
@@ -409,23 +405,23 @@ class Solver(object):
                 target_sentence_length = (target_sentences != 0).long().sum(1)
                 input_sentence_length = (input_sentences != 0).long().sum(1)
 
-                if isinstance(self.model, TRANSFORMER):
+                #if isinstance(self.model, TRANSFORMER):
 
                     # this can protect against random memory shortages
                     # input_histories = input_histories[:self.config.max_convo_len, :self.config.max_unroll]
                     # history_segments = history_segments[:self.config.max_convo_len, :self.config.max_unroll]
                     # target_sentences = target_sentences[:self.config.max_convo_len, :self.config.max_unroll]
 
-                    gold = self.add_sos(target_sentences)
+                    #gold = self.add_sos(target_sentences)
 
-                    sentence_logits = self.model(input_histories, history_segments, gold, decode=False)
+                sentence_logits = self.model(input_histories, history_segments, target_sentences, decode=False)
 
                     #batch_loss, n_words = masked_cross_entropy(sentence_logits, target_sentences, sentence_lens)
 
-                    if batch_i == 0:
-                        self.generate_transformer_sentence(input_histories, history_segments, target_sentences)
+                if batch_i == 0:
+                    self.generate_transformer_sentence(input_histories, history_segments, target_sentences)
 
-                else:
+                #else:
                     # input_conversations = [conv[:-1] for conv in conversations]
                     # target_conversations = [conv[1:] for conv in conversations]
                     #
@@ -444,17 +440,17 @@ class Solver(object):
                     # input_conversation_length = to_var(
                     #     torch.LongTensor(input_conversation_length))
 
-                    if batch_i == 0:
-                        self.generate_sentence(input_sentences,
-                                               input_sentence_length,
-                                               input_conversation_length,
-                                               target_sentences)
+                    #if batch_i == 0:
+                    #    self.generate_sentence(input_sentences,
+                    #                           input_sentence_length,
+                    #                           input_conversation_length,
+                    #                           target_sentences)
 
-                    sentence_logits = self.model(
-                        input_sentences,
-                        input_sentence_length,
-                        input_conversation_length,
-                        target_sentences)
+                    #sentence_logits = self.model(
+                    #    input_sentences,
+                    #    input_sentence_length,
+                    #    input_conversation_length,
+                    #    target_sentences)
 
                 batch_loss, n_words = masked_cross_entropy(
                     sentence_logits,

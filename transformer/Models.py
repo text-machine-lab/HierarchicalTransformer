@@ -8,6 +8,7 @@ import time
 import transformer.Constants as Constants
 from transformer.Layers import UNetEncoderLayer, EncoderLayer, DecoderLayer
 from transformer.SubLayers import MultiHeadAttention
+from model.utils.vocab import SOS_ID
 
 __author__ = "Yu-Hsiang Huang"
 
@@ -342,7 +343,9 @@ class GRUEncoder(nn.Module):
         non_pad_mask = get_non_pad_mask(src_seq)  # b x t
         src_embs = self.src_word_emb(src_seq)  # b x t x d
         gru_output, _ = self.gru(src_embs)
-        gru_output = gru_output * non_pad_mask
+        #gru_output = gru_output * non_pad_mask
+
+        #import pdb; pdb.set_trace()
 
         return gru_output,
 
@@ -390,6 +393,9 @@ class MultiHeadAttentionGRUDecoder(nn.Module):
 
         # concatenate all outputs
         outs = torch.cat(gru_outputs, 1)
+
+        #outs, _ = self.gru(word_input, final_states.squeeze(1).unsqueeze(0))
+
         if return_attns:
             return outs, None, dec_attns  # None because GRU does not do attention over itself
         return outs,
@@ -444,6 +450,7 @@ class Transformer(nn.Module):
             self.encoder.src_word_emb.weight = self.decoder.tgt_word_emb.weight
 
     def forward(self, src_seq, src_pos, tgt_seq, tgt_pos, src_segs=None, flat_logits=True):
+        # TODO add SOS token manually!
         tgt_seq, tgt_pos = tgt_seq[:, :-1], tgt_pos[:, :-1]
 
         enc_output, *_ = self.encoder(src_seq, src_pos, src_segs=src_segs)
@@ -463,7 +470,7 @@ class UNetTransformer(nn.Module):
             self,
             n_src_vocab, n_tgt_vocab, len_max_seq,
             d_word_vec=512, d_model=512, d_inner=2048,
-            n_layers=6, n_head=4, d_k=128, d_v=128, dropout=0.1,
+            n_layers=6, n_head=8, d_k=64, d_v=64, dropout=0.1,
             tgt_emb_prj_weight_sharing=True,
             emb_src_tgt_weight_sharing=True, unet=True):
 

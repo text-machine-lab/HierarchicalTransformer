@@ -8,6 +8,7 @@ sys.path.append('..') # ASSUMPTION - THIS MODULE LIES IN DIR NEXT TO TRANSFORMER
 import random
 from transformer.Models import Transformer, UNetTransformer
 from transformer.Translator import Translator
+from model.utils.vocab import SOS_ID
 
 VariationalModels = ['VHRED', 'VHCR']
 
@@ -22,6 +23,11 @@ class TRANSFORMER(nn.Module):
         # TODO try removing weight sharing
         self.translator = Translator(model=self.transformer, beam_size=config.beam_size, max_seq_len=config.gen_response_len)
 
+    def add_sos(self, x):
+        sos_id = torch.tensor(SOS_ID).to(x.device).view(1, 1).expand(x.shape[0], -1)
+        gold = torch.cat([sos_id, x], 1)
+        return gold
+
     def forward(self, histories, segments, responses, decode=False):
         """
         Args:
@@ -35,6 +41,10 @@ class TRANSFORMER(nn.Module):
 
         # calculate position vectors to locate each token
         # padding tokens set to zero
+
+        # HERE WE ADD GO TOKEN
+        responses = self.add_sos(responses)
+
         history_pos = calc_pos(histories)
         response_pos = calc_pos(responses)
 
@@ -92,8 +102,9 @@ class HRED(nn.Module):
         if config.tie_embedding:
             self.decoder.embedding = self.encoder.embedding
 
-    def forward(self, input_sentences, input_sentence_length,
-                input_conversation_length, target_sentences, decode=False):
+    #def forward(self, input_sentences, input_sentence_length,
+    #            input_conversation_length, target_sentences, decode=False):
+    def forward(self, histories, segments, target_sentences, decode=False):
         """
         Args:
             input_sentences: (Variable, LongTensor) [num_sentences, seq_len]
@@ -103,33 +114,47 @@ class HRED(nn.Module):
                 - train: [batch_size, seq_len, vocab_size]
                 - eval: [batch_size, seq_len]
         """
-        num_sentences = input_sentences.size(0)
-        max_len = input_conversation_length.data.max().item()
+        # TODO revert back to old HRED
+        num_sentences = histories.shape[0]
+        #max_len = input_conversation_length.data.max().item()
 
         # encoder_outputs: [num_sentences, max_source_length, hidden_size * direction]
         # encoder_hidden: [num_layers * direction, num_sentences, hidden_size]
-        encoder_outputs, encoder_hidden = self.encoder(input_sentences,
-                                                       input_sentence_length)
+
+        # TODO run encoder over all previous responses for each response in all conversations
+
+        #encoder_outputs, encoder_hidden = self.encoder(input_sentences,
+        #                                               input_sentence_length)
+
+        history_length = (histories != 0).sum(1)
+        encoder_outputs, encoder_hidden = self.encoder(histories, history_length)
 
         # encoder_hidden: [num_sentences, num_layers * direction * hidden_size]
         encoder_hidden = encoder_hidden.transpose(1, 0).contiguous().view(num_sentences, -1)
 
         # pad and pack encoder_hidden
-        start = torch.cumsum(torch.cat((to_var(input_conversation_length.data.new(1).zero_()),
-                                        input_conversation_length[:-1])), 0)
+        #start = torch.cumsum(torch.cat((to_var(input_conversation_length.data.new(1).zero_()),
+        #                                input_conversation_length[:-1])), 0)
         # encoder_hidden: [batch_size, max_len, num_layers * direction * hidden_size]
-        encoder_hidden = torch.stack([pad(encoder_hidden.narrow(0, s, l), max_len)
-                                      for s, l in zip(start.data.tolist(),
-                                                      input_conversation_length.data.tolist())], 0)
+        #encoder_hidden = torch.stack([pad(encoder_hidden.narrow(0, s, l), max_len)
+        #                              for s, l in zip(start.data.tolist(),
+        #                                              input_conversation_length.data.tolist())], 0)
+
+        # TODO run context over all previous responses for each response in all conversations
 
         # context_outputs: [batch_size, max_len, context_size]
-        context_outputs, context_last_hidden = self.context_encoder(encoder_hidden,
-                                                                    input_conversation_length)
+        #context_outputs, context_last_hidden = self.context_encoder(encoder_hidden,
+        #                                                            input_conversation_length)
+
+        # TODO grab context outputs for each final response
 
         # flatten outputs
         # context_outputs: [num_sentences, context_size]
-        context_outputs = torch.cat([context_outputs[i, :l, :]
-                                     for i, l in enumerate(input_conversation_length.data)])
+        # this grabs all non-zero context outputse
+        #context_outputs = torch.cat([context_outputs[i, :l, :]
+        #                             for i, l in enumerate(input_conversation_length.data)])
+
+        context_outputs = encoder_hidden
 
         # project context_outputs to decoder init state
         decoder_init = self.context2decoder(context_outputs)
