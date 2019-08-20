@@ -337,7 +337,6 @@ class GRUEncoder(nn.Module):
     def __init__(self, n_src_vocab, d_model):
         super().__init__()
         self.src_word_emb = nn.Embedding(n_src_vocab, d_model, padding_idx=Constants.PAD)
-        self.embedding = self.src_word_emb
         self.gru = nn.GRU(d_model, d_model, batch_first=True)
 
     def forward(self, src_seq, src_pos=None, src_segs=None):
@@ -357,7 +356,7 @@ class MultiHeadAttentionGRUDecoder(nn.Module):
         print('Using GRU!!!!')
         self.tgt_word_emb = nn.Embedding(
             n_tgt_vocab, d_model, padding_idx=Constants.PAD)
-
+        self.embedding = self.tgt_word_emb
         self.enc_attn = MultiHeadAttention(n_head, d_model, d_k, d_v, dropout=dropout)
         self.gru = nn.GRU(d_model * 2, d_model, batch_first=True)
 

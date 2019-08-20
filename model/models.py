@@ -13,6 +13,12 @@ from model.utils.vocab import SOS_ID
 
 VariationalModels = ['VHRED', 'VHCR']
 
+
+def add_sos(x):
+    sos_id = torch.tensor(SOS_ID).to(x.device).view(1, 1).expand(x.shape[0], -1)
+    gold = torch.cat([sos_id, x], 1)
+    return gold
+
 class TRANSFORMER(nn.Module):
     def __init__(self, config):
         super(TRANSFORMER, self).__init__()
@@ -23,11 +29,6 @@ class TRANSFORMER(nn.Module):
 
         # TODO try removing weight sharing
         self.translator = Translator(model=self.transformer, beam_size=config.beam_size, max_seq_len=config.gen_response_len)
-
-    def add_sos(self, x):
-        sos_id = torch.tensor(SOS_ID).to(x.device).view(1, 1).expand(x.shape[0], -1)
-        gold = torch.cat([sos_id, x], 1)
-        return gold
 
     def forward(self, histories, segments, responses, decode=False):
         """
@@ -44,7 +45,7 @@ class TRANSFORMER(nn.Module):
         # padding tokens set to zero
 
         # HERE WE ADD GO TOKEN
-        responses = self.add_sos(responses)
+        responses = add_sos(responses)
 
         history_pos = calc_pos(histories)
         response_pos = calc_pos(responses)
@@ -87,25 +88,33 @@ class HRED(nn.Module):
         #                                          config.num_layers,
         #                                          config.dropout)
 
-        self.decoder = layers.DecoderRNN(config.vocab_size,
-                                         config.embedding_size,
-                                         config.decoder_hidden_size,
-                                         config.rnncell,
-                                         config.num_layers,
-                                         config.dropout,
-                                         config.word_drop,
-                                         config.max_unroll,
-                                         config.sample,
-                                         config.temperature,
-                                         config.beam_size)
+        # self.decoder = layers.DecoderRNN(config.vocab_size,
+        #                                  config.embedding_size,
+        #                                  config.decoder_hidden_size,
+        #                                  config.rnncell,
+        #                                  config.num_layers,
+        #                                  config.dropout,
+        #                                  config.word_drop,
+        #                                  config.max_unroll,
+        #                                  config.sample,
+        #                                  config.temperature,
+        #                                  config.beam_size)
+
+        self.decoder = MultiHeadAttentionGRUDecoder(config.vocab_size, config.decoder_hidden_size, dropout=config.dropout)
 
         self.context2decoder = layers.FeedForward(config.context_size,
                                                   config.num_layers * config.decoder_hidden_size,
                                                   num_layers=1,
                                                   activation=config.activation)
 
+        self.tgt_word_prj = nn.Linear(config.decoder_hidden_size, config.vocab_size, bias=False)
+
         if config.tie_embedding:
-            self.decoder.embedding = self.encoder.embedding
+            # TODO undo embedding name differences
+            #self.decoder.embedding = self.encoder.embedding
+            self.decoder.tgt_word_emb = self.encoder.src_word_emb
+            self.tgt_word_prj.weight = self.decoder.tgt_word_emb.weight
+            self.x_logit_scale = (config.decoder_hidden_size ** -0.5)
 
     #def forward(self, input_sentences, input_sentence_length,
     #            input_conversation_length, target_sentences, decode=False):
@@ -167,31 +176,44 @@ class HRED(nn.Module):
         decoder_init = self.context2decoder(context_outputs)
 
         # [num_layers, batch_size, hidden_size]
-        decoder_init = decoder_init.view(self.decoder.num_layers, -1, self.decoder.hidden_size)
+        #decoder_init = decoder_init.view(self.decoder.num_layers, -1, self.decoder.hidden_size)
 
         # train: [batch_size, seq_len, vocab_size]
         # eval: [batch_size, seq_len]
-        if not decode:
 
-            decoder_outputs = self.decoder(target_sentences,
-                                           init_h=decoder_init,
-                                           decode=decode)
-            return decoder_outputs
+        history_pos = calc_pos(histories)
+
+        if not decode:
+            #
+            # decoder_outputs = self.decoder(target_sentences,
+            #                                init_h=decoder_init,
+            #                                decode=decode)
+
+            target_sentences = add_sos(target_sentences)[:, :-1]
+            decoder_outputs, = self.decoder(target_sentences, history_pos, histories, encoder_outputs)
+            seq_logit = self.tgt_word_prj(decoder_outputs) * self.x_logit_scale
+
+            #import pdb; pdb.set_trace()
+            return seq_logit
 
         else:
+            pass
             # decoder_outputs = self.decoder(target_sentences,
             #                                init_h=decoder_init,
             #                                decode=decode)
             # return decoder_outputs.unsqueeze(1)
             # prediction: [batch_size, beam_size, max_unroll]
-            prediction, final_score, length = self.decoder.beam_decode(init_h=decoder_init)
+            #prediction, final_score, length = self.decoder.beam_decode(init_h=decoder_init)
+
+            #batch_hyp, batch_logits = self.translator.translate_batch(histories, history_pos, src_segs=segments)
+            #return batch_hyp
 
             # Get top prediction only
             # [batch_size, max_unroll]
             # prediction = prediction[:, 0]
 
             # [batch_size, beam_size, max_unroll]
-            return prediction
+            #return prediction
 
     def generate(self, context, sentence_length, n_context):
         # context: [batch_size, n_context, seq_len]
