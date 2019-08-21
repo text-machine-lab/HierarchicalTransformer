@@ -379,7 +379,7 @@ class MultiHeadAttentionGRUDecoder(nn.Module):
         dec_attns = []
         gru_output = decoder_init.squeeze(0)  # word_input[:, 0, :].unsqueeze(1)
         for t in range(word_input.shape[1]):
-            word_emb = word_input[:, t, :]
+            word_emb = word_input[:, t]
             #word_emb = word_emb # b x d
             #step_mask = dec_enc_attn_mask[:, t, :].unsqueeze(1)  #TODO inspect this
             # we perform attention over the encoder

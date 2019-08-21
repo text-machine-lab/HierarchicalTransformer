@@ -25,7 +25,8 @@ class TRANSFORMER(nn.Module):
         self.config = config
         transformer_type = Transformer if not config.unet else GRUModel
         self.transformer = transformer_type(config.vocab_size, config.vocab_size, config.max_unroll, config.encoder_hidden_size,
-                                       config.encoder_hidden_size, config.encoder_hidden_size * 4, unet=config.unet)
+                                       config.encoder_hidden_size, config.encoder_hidden_size * 4, unet=config.unet,
+                                            tgt_emb_prj_weight_sharing=False)
 
         # TODO try removing weight sharing
         self.translator = Translator(model=self.transformer, beam_size=config.beam_size, max_seq_len=config.gen_response_len)
@@ -88,19 +89,19 @@ class HRED(nn.Module):
         #                                          config.num_layers,
         #                                          config.dropout)
 
-        self.decoder = layers.DecoderRNN(config.vocab_size,
-                                         config.embedding_size,
-                                         config.decoder_hidden_size,
-                                         config.rnncell,
-                                         config.num_layers,
-                                         config.dropout,
-                                         config.word_drop,
-                                         config.max_unroll,
-                                         config.sample,
-                                         config.temperature,
-                                         config.beam_size)
+        # self.decoder = layers.DecoderRNN(config.vocab_size,
+        #                                  config.embedding_size,
+        #                                  config.decoder_hidden_size,
+        #                                  config.rnncell,
+        #                                  config.num_layers,
+        #                                  config.dropout,
+        #                                  config.word_drop,
+        #                                  config.max_unroll,
+        #                                  config.sample,
+        #                                  config.temperature,
+        #                                  config.beam_size)
 
-        #self.decoder = MultiHeadAttentionGRUDecoder(config.vocab_size, config.decoder_hidden_size, dropout=config.dropout)
+        self.decoder = MultiHeadAttentionGRUDecoder(config.vocab_size, config.decoder_hidden_size, dropout=config.dropout)
 
         self.context2decoder = layers.FeedForward(config.context_size,
                                                   config.num_layers * config.decoder_hidden_size,
@@ -111,10 +112,12 @@ class HRED(nn.Module):
 
         if config.tie_embedding:
             # TODO undo embedding name differences
-            self.decoder.embedding = self.encoder.src_word_emb
-            # self.decoder.tgt_word_emb.weight = self.encoder.src_word_emb.weight
-            # self.tgt_word_prj.weight = self.decoder.tgt_word_emb.weight
-            # self.x_logit_scale = (config.decoder_hidden_size ** -0.5)
+            #self.decoder.embedding.weight = self.encoder.src_word_emb.weight
+            #self.decoder.out.weight = self.decoder.embedding.weight
+
+            self.decoder.tgt_word_emb.weight = self.encoder.src_word_emb.weight
+            #self.tgt_word_prj.weight = self.decoder.tgt_word_emb.weight
+            #self.x_logit_scale = (config.decoder_hidden_size ** -0.5)
 
     #def forward(self, input_sentences, input_sentence_length,
     #            input_conversation_length, target_sentences, decode=False):
@@ -173,7 +176,7 @@ class HRED(nn.Module):
         context_outputs = encoder_hidden
 
         # project context_outputs to decoder init state
-        decoder_init = self.context2decoder(context_outputs)
+        decoder_init = context_outputs  # self.context2decoder(context_outputs)
 
         # [num_layers, batch_size, hidden_size]
         decoder_init = decoder_init.view(self.config.num_layers, -1, self.config.decoder_hidden_size)
@@ -185,17 +188,18 @@ class HRED(nn.Module):
 
         if not decode:
 
-            decoder_outputs = self.decoder(target_sentences,
-                                           init_h=decoder_init,
-                                           encoder_outputs=encoder_outputs,
-                                           decode=decode)
-            return decoder_outputs
+            target_sentences = add_sos(target_sentences)[:, :-1]
 
-            # target_sentences = add_sos(target_sentences)[:, :-1]
-            # decoder_outputs, = self.decoder(target_sentences, history_pos, histories, decoder_init)
-            # seq_logit = self.tgt_word_prj(decoder_outputs)
-            #
-            #return seq_logit
+            # decoder_outputs = self.decoder(target_sentences,
+            #                                init_h=decoder_init,
+            #                                encoder_outputs=encoder_outputs,
+            #                                decode=decode)
+            # return decoder_outputs
+
+            decoder_outputs, = self.decoder(target_sentences, history_pos, histories, decoder_init)
+            seq_logit = self.tgt_word_prj(decoder_outputs)
+
+            return seq_logit
 
         else:
             pass

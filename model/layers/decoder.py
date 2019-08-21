@@ -237,7 +237,7 @@ class DecoderRNN(BaseRNNDecoder):
 
         self.rnncell = nn.GRUCell(embedding_size, hidden_size)
 
-        self.out = nn.Linear(hidden_size, vocab_size)
+        self.out = nn.Linear(hidden_size, vocab_size, bias=False)
         self.softmax = nn.Softmax(dim=1)
 
     def forward_step(self, x, h,
@@ -285,31 +285,32 @@ class DecoderRNN(BaseRNNDecoder):
             Return:
                 out   : [batch_size, seq_len]
         """
-        batch_size = self.batch_size(inputs, init_h)
+        #batch_size = self.batch_size(inputs, init_h)
 
         # x: [batch_size]
-        x = self.init_token(batch_size, SOS_ID)
+        #x = self.init_token(batch_size, SOS_ID)
 
         # h: [num_layers, batch_size, hidden_size]
-        h = self.init_h(batch_size, hidden=init_h).squeeze(0)
+        h = init_h.squeeze(0)  # self.init_h(batch_size, hidden=init_h).squeeze(0)
 
+        inputs = self.embedding(inputs)
 
         if not decode:
             out_list = []
             seq_len = inputs.size(1)
             for i in range(seq_len):
-
+                x = inputs[:, i]
                 # x: [batch_size]
                 # =>
                 # out: [batch_size, vocab_size]
                 # h: [num_layers, batch_size, hidden_size] (h and c from all layers)
-                out, h = self.forward_step(x, h)
+                h = self.rnncell(x, h)
 
-                out_list.append(out)
-                x = inputs[:, i]
+                out_list.append(h)
 
             # [batch_size, max_target_len, vocab_size]
-            return torch.stack(out_list, dim=1)
+            hs = torch.stack(out_list, dim=1)
+            return self.out(hs)
         else:
             x_list = []
             for i in range(self.max_unroll):
