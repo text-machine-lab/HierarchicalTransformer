@@ -99,7 +99,8 @@ class Encoder(nn.Module):
         non_pad_mask = get_non_pad_mask(src_seq)
 
         # -- Forward
-        enc_output = self.src_word_emb(src_seq) + self.position_enc(src_pos)
+        enc_output = self.src_word_emb(src_seq)
+        enc_output = enc_output + self.position_enc(src_pos)
 
         if src_segs is not None:
             enc_output = enc_output + self.seg_enc(src_segs)
@@ -358,41 +359,42 @@ class MultiHeadAttentionGRUDecoder(nn.Module):
             n_tgt_vocab, d_model, padding_idx=Constants.PAD)
         self.embedding = self.tgt_word_emb
         self.enc_attn = MultiHeadAttention(n_head, d_model, d_k, d_v, dropout=dropout)
-        self.gru = nn.GRU(d_model * 2, d_model, batch_first=True)
+        self.gru = nn.GRUCell(d_model, d_model)
 
-    def forward(self, tgt_seq, tgt_pos, src_seq, enc_output, return_attns=False):
+    def forward(self, tgt_seq, tgt_pos, src_seq, decoder_init, return_attns=False):
 
         # we look up word embeddings for tgt_seq
         word_input = self.tgt_word_emb(tgt_seq)
 
         # we calculate attention mask for padding purposes
-        dec_enc_attn_mask = get_attn_key_pad_mask(seq_k=src_seq, seq_q=tgt_seq)
+        #dec_enc_attn_mask = get_attn_key_pad_mask(seq_k=src_seq, seq_q=tgt_seq)
 
         # here we grab final states of encoder output
 
-        final_state_idx = (tgt_seq != 0).sum(1) - 1
-        final_states = batched_index_select(enc_output, 1, final_state_idx)
+        # TODO restore encoder states as input!
+        #final_state_idx = (tgt_seq != 0).sum(1) - 1
+        #final_states = batched_index_select(enc_output, 1, final_state_idx).squeeze(1)
 
         gru_outputs = []
         dec_attns = []
-        gru_output = final_states  # word_input[:, 0, :].unsqueeze(1)
+        gru_output = decoder_init.squeeze(0)  # word_input[:, 0, :].unsqueeze(1)
         for t in range(word_input.shape[1]):
             word_emb = word_input[:, t, :]
-            word_emb = word_emb.unsqueeze(1) # b x 1 x d
-            step_mask = dec_enc_attn_mask[:, t, :].unsqueeze(1)  #TODO inspect this
+            #word_emb = word_emb # b x d
+            #step_mask = dec_enc_attn_mask[:, t, :].unsqueeze(1)  #TODO inspect this
             # we perform attention over the encoder
-            attn_vec, attn = self.enc_attn(gru_output, enc_output, enc_output, mask=step_mask)
+            #attn_vec, attn = self.enc_attn(gru_output.unsqueeze(1), enc_output, enc_output, mask=step_mask)
             # we concatenate word and attention vector
-            gru_input = torch.cat([word_emb, attn_vec], 2) # b x 1 x 2d
+            #gru_input = torch.cat([word_emb, attn_vec.squeeze(1)], 1) # b x 1 x 2d
             # run GRU step to get output
-            gru_output = self.gru(gru_input, gru_output.squeeze(1).unsqueeze(0))[0]
+            gru_output = self.gru(word_emb, gru_output)
             # add output to list
             gru_outputs.append(gru_output)
             # save attention maps for viewing
-            dec_attns.append(attn)
+            #dec_attns.append(attn)
 
         # concatenate all outputs
-        outs = torch.cat(gru_outputs, 1)
+        outs = torch.stack(gru_outputs, 1)
 
         #outs, _ = self.gru(word_input, final_states.squeeze(1).unsqueeze(0))
 
@@ -452,7 +454,6 @@ class Transformer(nn.Module):
     def forward(self, src_seq, src_pos, tgt_seq, tgt_pos, src_segs=None, flat_logits=True):
         # TODO add SOS token manually!
         tgt_seq, tgt_pos = tgt_seq[:, :-1], tgt_pos[:, :-1]
-
         enc_output, *_ = self.encoder(src_seq, src_pos, src_segs=src_segs)
         dec_output, *_ = self.decoder(tgt_seq, tgt_pos, src_seq, enc_output)
         seq_logit = self.tgt_word_prj(dec_output) * self.x_logit_scale
@@ -463,7 +464,7 @@ class Transformer(nn.Module):
             return seq_logit
 
 
-class UNetTransformer(nn.Module):
+class GRUModel(nn.Module):
     ''' A sequence to sequence model with attention mechanism. '''
 
     def __init__(

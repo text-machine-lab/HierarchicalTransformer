@@ -418,8 +418,9 @@ class Solver(object):
 
                     #batch_loss, n_words = masked_cross_entropy(sentence_logits, target_sentences, sentence_lens)
 
-                if batch_i == 0:
-                    self.generate_transformer_sentence(input_histories, history_segments, target_sentences)
+                # TODO allow generation from HRED
+                #if batch_i == 0:
+                #    self.generate_transformer_sentence(input_histories, history_segments, target_sentences)
 
                 #else:
                     # input_conversations = [conv[:-1] for conv in conversations]

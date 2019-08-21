@@ -6,7 +6,7 @@ import numpy as np
 import sys
 sys.path.append('..') # ASSUMPTION - THIS MODULE LIES IN DIR NEXT TO TRANSFORMER DIR
 import random
-from transformer.Models import Transformer, UNetTransformer, GRUEncoder, MultiHeadAttentionGRUDecoder
+from transformer.Models import Transformer, GRUModel, GRUEncoder, MultiHeadAttentionGRUDecoder
 from transformer.Translator import Translator
 from transformer.Models import batched_index_select
 from model.utils.vocab import SOS_ID
@@ -23,7 +23,7 @@ class TRANSFORMER(nn.Module):
     def __init__(self, config):
         super(TRANSFORMER, self).__init__()
         self.config = config
-        transformer_type = Transformer if not config.unet else UNetTransformer
+        transformer_type = Transformer if not config.unet else GRUModel
         self.transformer = transformer_type(config.vocab_size, config.vocab_size, config.max_unroll, config.encoder_hidden_size,
                                        config.encoder_hidden_size, config.encoder_hidden_size * 4, unet=config.unet)
 
@@ -107,12 +107,12 @@ class HRED(nn.Module):
                                                   num_layers=1,
                                                   activation=config.activation)
 
-        #self.tgt_word_prj = nn.Linear(config.decoder_hidden_size, config.vocab_size, bias=False)
+        self.tgt_word_prj = nn.Linear(config.decoder_hidden_size, config.vocab_size, bias=False)
 
         if config.tie_embedding:
             # TODO undo embedding name differences
             self.decoder.embedding = self.encoder.src_word_emb
-            # self.decoder.tgt_word_emb = self.encoder.src_word_emb
+            # self.decoder.tgt_word_emb.weight = self.encoder.src_word_emb.weight
             # self.tgt_word_prj.weight = self.decoder.tgt_word_emb.weight
             # self.x_logit_scale = (config.decoder_hidden_size ** -0.5)
 
@@ -176,7 +176,7 @@ class HRED(nn.Module):
         decoder_init = self.context2decoder(context_outputs)
 
         # [num_layers, batch_size, hidden_size]
-        decoder_init = decoder_init.view(self.decoder.num_layers, -1, self.decoder.hidden_size)
+        decoder_init = decoder_init.view(self.config.num_layers, -1, self.config.decoder_hidden_size)
 
         # train: [batch_size, seq_len, vocab_size]
         # eval: [batch_size, seq_len]
@@ -187,15 +187,15 @@ class HRED(nn.Module):
 
             decoder_outputs = self.decoder(target_sentences,
                                            init_h=decoder_init,
+                                           encoder_outputs=encoder_outputs,
                                            decode=decode)
+            return decoder_outputs
 
             # target_sentences = add_sos(target_sentences)[:, :-1]
-            # decoder_outputs, = self.decoder(target_sentences, history_pos, histories, encoder_outputs)
-            # seq_logit = self.tgt_word_prj(decoder_outputs) * self.x_logit_scale
-
-            #import pdb; pdb.set_trace()
+            # decoder_outputs, = self.decoder(target_sentences, history_pos, histories, decoder_init)
+            # seq_logit = self.tgt_word_prj(decoder_outputs)
+            #
             #return seq_logit
-            return decoder_outputs
 
         else:
             pass
@@ -204,17 +204,17 @@ class HRED(nn.Module):
             #                                decode=decode)
             # return decoder_outputs.unsqueeze(1)
             #prediction: [batch_size, beam_size, max_unroll]
-            prediction, final_score, length = self.decoder.beam_decode(init_h=decoder_init)
+            #prediction, final_score, length = self.decoder.beam_decode(init_h=decoder_init)
+            # return prediction
 
-            # batch_hyp, batch_logits = self.translator.translate_batch(histories, history_pos, src_segs=segments)
-            # return batch_hyp
+            batch_hyp, batch_logits = self.translator.translate_batch(histories, history_pos, src_segs=segments)
+            return batch_hyp
 
             # Get top prediction only
             # [batch_size, max_unroll]
             # prediction = prediction[:, 0]
             #
             # [batch_size, beam_size, max_unroll]
-            return prediction
 
     def generate(self, context, sentence_length, n_context):
         # context: [batch_size, n_context, seq_len]

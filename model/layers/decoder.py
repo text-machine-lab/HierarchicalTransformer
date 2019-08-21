@@ -229,10 +229,14 @@ class DecoderRNN(BaseRNNDecoder):
 
         self.embedding = nn.Embedding(vocab_size, embedding_size)
 
-        self.rnncell = rnncell(num_layers,
-                               embedding_size,
-                               hidden_size,
-                               dropout)
+        # num layers is no longer used!
+        #self.rnncell = rnncell(num_layers,
+        #                       embedding_size,
+        #                       hidden_size,
+        #                       dropout)
+
+        self.rnncell = nn.GRUCell(embedding_size, hidden_size)
+
         self.out = nn.Linear(hidden_size, vocab_size)
         self.softmax = nn.Softmax(dim=1)
 
@@ -254,20 +258,15 @@ class DecoderRNN(BaseRNNDecoder):
             h: [num_layers, batch_size, hidden_size] (h and c from all layers)
         """
         # x: [batch_size] => [batch_size, hidden_size]
-        x = self.embed(x)
+        x = self.embedding(x)
 
         # last_h: [batch_size, hidden_size] (h from Top RNN layer)
         # h: [num_layers, batch_size, hidden_size] (h and c from all layers)
-        last_h, h = self.rnncell(x, h)
-
-        if self.use_lstm:
-            # last_h_c: [2, batch_size, hidden_size] (h from Top RNN layer)
-            # h_c: [2, num_layers, batch_size, hidden_size] (h and c from all layers)
-            last_h = last_h[0]
+        h = self.rnncell(x, h)
 
         # Unormalized word distribution
         # out: [batch_size, vocab_size]
-        out = self.out(last_h)
+        out = self.out(h)
         return out, h
 
     def forward(self, inputs, init_h=None, encoder_outputs=None, input_valid_length=None,
@@ -292,7 +291,7 @@ class DecoderRNN(BaseRNNDecoder):
         x = self.init_token(batch_size, SOS_ID)
 
         # h: [num_layers, batch_size, hidden_size]
-        h = self.init_h(batch_size, hidden=init_h)
+        h = self.init_h(batch_size, hidden=init_h).squeeze(0)
 
 
         if not decode:
