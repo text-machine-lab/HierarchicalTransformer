@@ -92,19 +92,22 @@ def get_config(parse=True, **optional_kwargs):
     parser.add_argument('--optimizer', type=str, default='Adam')
     parser.add_argument('--clip', type=float, default=1.0)
     parser.add_argument('--checkpoint', type=str, default=None)
-    parser.add_argument('--unet', action='store_true', default=False)
     parser.add_argument('--tg_enable', action='store_true', default=False)
+    parser.add_argument('--encoder_type', type=str, default='transformer')
+    parser.add_argument('--decoder_type', type=str, default='transformer')
 
     # Generation
     parser.add_argument('--max_unroll', type=int, default=30)
     parser.add_argument('--gen_response_len', type=int, default=30)
     parser.add_argument('--max_examples', type=int, default=None)
     parser.add_argument('--n_warmup_steps', type=int, default=4000)
-    parser.add_argument('--max_convo_len', type=int, default=10)  # ONLY USED FOR TRANSFORMER!!!
+    parser.add_argument('--max_convo_len', type=int, default=100)  # ONLY USED FOR TRANSFORMER!!!
     parser.add_argument('--sample', type=str2bool, default=False,
                         help='if false, use beam search for decoding')
     parser.add_argument('--temperature', type=float, default=1.0)
     parser.add_argument('--beam_size', type=int, default=1)
+    parser.add_argument('--max_history', type=int, default=250)
+    parser.add_argument('--msg', type=str, default='')
 
     # Model
     parser.add_argument('--model', type=str, default='VHCR',
@@ -116,7 +119,7 @@ def get_config(parse=True, **optional_kwargs):
     parser.add_argument('--embedding_size', type=int, default=500)
     parser.add_argument('--tie_embedding', type=str2bool, default=True)
     parser.add_argument('--encoder_hidden_size', type=int, default=1000)
-    parser.add_argument('--bidirectional', type=str2bool, default=True)
+    parser.add_argument('--bidirectional', type=str2bool, default=False)
     parser.add_argument('--decoder_hidden_size', type=int, default=1000)
     parser.add_argument('--dropout', type=float, default=0.0)
     parser.add_argument('--context_size', type=int, default=1000)

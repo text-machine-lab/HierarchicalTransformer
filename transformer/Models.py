@@ -358,36 +358,37 @@ class MultiHeadAttentionGRUDecoder(nn.Module):
         self.tgt_word_emb = nn.Embedding(
             n_tgt_vocab, d_model, padding_idx=Constants.PAD)
         self.embedding = self.tgt_word_emb
+        self.hidden_enc = nn.Linear(d_model, d_model)
         self.enc_attn = MultiHeadAttention(n_head, d_model, d_k, d_v, dropout=dropout)
-        self.gru = nn.GRUCell(d_model, d_model)
+        self.gru = nn.GRUCell(d_model * 2, d_model)
 
-    def forward(self, tgt_seq, tgt_pos, src_seq, decoder_init, return_attns=False):
+    def forward(self, tgt_seq, tgt_pos, src_seq, encoder_output, return_attns=False):
 
         # we look up word embeddings for tgt_seq
         word_input = self.tgt_word_emb(tgt_seq)
 
         # we calculate attention mask for padding purposes
-        #dec_enc_attn_mask = get_attn_key_pad_mask(seq_k=src_seq, seq_q=tgt_seq)
+        dec_enc_attn_mask = get_attn_key_pad_mask(seq_k=src_seq, seq_q=tgt_seq)
 
         # here we grab final states of encoder output
 
         # TODO restore encoder states as input!
-        #final_state_idx = (tgt_seq != 0).sum(1) - 1
-        #final_states = batched_index_select(enc_output, 1, final_state_idx).squeeze(1)
+        final_state_idx = (src_seq != 0).sum(1) - 1
+        final_states = batched_index_select(encoder_output, 1, final_state_idx).squeeze(1)
 
         gru_outputs = []
         dec_attns = []
-        gru_output = decoder_init.squeeze(0)  # word_input[:, 0, :].unsqueeze(1)
+        gru_output = torch.tanh(self.hidden_enc(final_states))  # word_input[:, 0, :].unsqueeze(1)
         for t in range(word_input.shape[1]):
             word_emb = word_input[:, t]
             #word_emb = word_emb # b x d
-            #step_mask = dec_enc_attn_mask[:, t, :].unsqueeze(1)  #TODO inspect this
+            step_mask = dec_enc_attn_mask[:, t, :].unsqueeze(1)  #TODO inspect this
             # we perform attention over the encoder
-            #attn_vec, attn = self.enc_attn(gru_output.unsqueeze(1), enc_output, enc_output, mask=step_mask)
+            attn_vec, attn = self.enc_attn(gru_output.unsqueeze(1), encoder_output, encoder_output, mask=step_mask)
             # we concatenate word and attention vector
-            #gru_input = torch.cat([word_emb, attn_vec.squeeze(1)], 1) # b x 1 x 2d
+            gru_input = torch.cat([word_emb, attn_vec.squeeze(1)], 1) # b x 1 x 2d
             # run GRU step to get output
-            gru_output = self.gru(word_emb, gru_output)
+            gru_output = self.gru(gru_input, gru_output)
             # add output to list
             gru_outputs.append(gru_output)
             # save attention maps for viewing
@@ -409,12 +410,13 @@ class Transformer(nn.Module):
             self,
             n_src_vocab, n_tgt_vocab, len_max_seq,
             d_word_vec=512, d_model=512, d_inner=2048,
-            n_layers=6, n_head=8, d_k=64, d_v=64, dropout=0.1,
+            n_layers=6, n_head=8, dropout=0.1,
             tgt_emb_prj_weight_sharing=True,
             emb_src_tgt_weight_sharing=True, unet=True):
 
         super().__init__()
         self.len_max_seq = len_max_seq
+        d_k = d_v = d_model // n_head
         # this is the major modification of the project
         # TODO change back to UNet encoder, right now we are trying GRU decoder
         encoder_type = Encoder # if not unet else UNetEncoder
@@ -440,6 +442,7 @@ class Transformer(nn.Module):
 
         if tgt_emb_prj_weight_sharing:
             # Share the weight matrix between target word embedding & the final logit dense layer
+            print('Sharing input/output embeddings of decoder')
             self.tgt_word_prj.weight = self.decoder.tgt_word_emb.weight
             self.x_logit_scale = (d_model ** -0.5)
         else:
@@ -464,39 +467,45 @@ class Transformer(nn.Module):
             return seq_logit
 
 
-class GRUModel(nn.Module):
+class MultiModel(nn.Module):
     ''' A sequence to sequence model with attention mechanism. '''
 
     def __init__(
             self,
             n_src_vocab, n_tgt_vocab, len_max_seq,
             d_word_vec=512, d_model=512, d_inner=2048,
-            n_layers=6, n_head=8, d_k=64, d_v=64, dropout=0.1,
+            n_layers=6, n_head=8, dropout=0.1,
             tgt_emb_prj_weight_sharing=True,
-            emb_src_tgt_weight_sharing=True, unet=True):
+            emb_src_tgt_weight_sharing=True, encoder='transformer', decoder='transformer'):
 
         super().__init__()
         self.len_max_seq = len_max_seq
+        d_k = d_v = d_model // n_head
         # this is the major modification of the project
-        encoder_type = Encoder if not unet else UNetEncoder
-        #
-        # self.encoder = encoder_type(
-        #     n_src_vocab=n_src_vocab, len_max_seq=len_max_seq,
-        #     d_word_vec=d_word_vec, d_model=d_model, d_inner=d_inner,
-        #     n_layers=n_layers, n_head=n_head, d_k=d_k, d_v=d_v,
-        #     dropout=dropout)
+        encoder_type = Encoder if not encoder == 'unet' else UNetEncoder
 
-        self.encoder = GRUEncoder(n_src_vocab, d_model)
+        if encoder == 'transformer' or encoder == 'unet':
 
-        # self.decoder = Decoder(
-        #     n_tgt_vocab=n_tgt_vocab, len_max_seq=len_max_seq,
-        #     d_word_vec=d_word_vec, d_model=d_model, d_inner=d_inner,
-        #     n_layers=n_layers, n_head=n_head, d_k=d_k, d_v=d_v,
-        #     dropout=dropout)
+            self.encoder = encoder_type(
+                n_src_vocab=n_src_vocab, len_max_seq=len_max_seq,
+                d_word_vec=d_word_vec, d_model=d_model, d_inner=d_inner,
+                n_layers=n_layers, n_head=n_head, d_k=d_k, d_v=d_v,
+                dropout=dropout)
+        elif encoder == 'gru':
+            self.encoder = GRUEncoder(n_src_vocab, d_model)
+        else:
+            raise RuntimeError('Must specify encoder type')
 
-        # TODO determine if this decoder helps performance!
-        # for conversation, we use a GRU decoder instead
-        self.decoder = MultiHeadAttentionGRUDecoder(n_tgt_vocab, d_model, d_k, d_v, n_head, dropout=dropout)
+        if decoder == 'transformer':
+            self.decoder = Decoder(
+                n_tgt_vocab=n_tgt_vocab, len_max_seq=len_max_seq,
+                d_word_vec=d_word_vec, d_model=d_model, d_inner=d_inner,
+                n_layers=n_layers, n_head=n_head, d_k=d_k, d_v=d_v,
+                dropout=dropout)
+        elif decoder == 'gru':
+            self.decoder = MultiHeadAttentionGRUDecoder(n_tgt_vocab, d_model, d_k, d_v, n_head, dropout=dropout)
+        else:
+            raise RuntimeError('Must specify decoder type')
 
         self.tgt_word_prj = nn.Linear(d_model, n_tgt_vocab, bias=False)
         nn.init.xavier_normal_(self.tgt_word_prj.weight)

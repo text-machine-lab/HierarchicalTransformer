@@ -13,12 +13,14 @@ import random
 from tqdm import tqdm
 from math import isnan
 import datetime
-from torch.utils.tensorboard import SummaryWriter
+#from torch.utils.tensorboard import SummaryWriter
 import re
 import math
 import pickle
 import gensim
-from models import TRANSFORMER
+from models import TRANSFORMER, MULTI
+
+import wandb
 
 import sys
 sys.path.append('..')
@@ -30,6 +32,15 @@ alert = tgalert.TelegramAlert()
 
 
 word2vec_path = "../datasets/GoogleNews-vectors-negative300.bin"
+
+def get_gpu_memory_used():
+    alloc_mem = 0
+
+    for i in range(torch.cuda.device_count()):
+        alloc_mem += torch.cuda.memory_allocated(i)
+
+    return alloc_mem
+
 
 class MyDataParallel(torch.nn.DataParallel):
     """
@@ -79,12 +90,17 @@ class Solver(object):
         if not self.config.tg_enable:
             alert.disable = True
 
-        self.writer = SummaryWriter('logdir/' + str(datetime.datetime.now()) + '-model='
-                                    + str(type(self.model)) + '-epochs=' + str(self.config.n_epoch) +
-                                    '-batches=' + str(len(self.train_data_loader)) + '-unet=' + str(self.config.unet))
+        # self.writer = SummaryWriter('logdir/' + str(datetime.datetime.now()) + '|model='
+        #                             + str(type(self.model)) + '|epochs=' + str(self.config.n_epoch) +
+        #                             '|batches=' + str(len(self.train_data_loader)) + '|enc=' + self.config.encoder_type +
+        #                             '|dec=' + self.config.decoder_type + '|msg=' + self.config.msg)
 
         n_params = sum([param.numel() for param in self.model.parameters()])
         print('Number of parameters: %s' % n_params)
+
+        str_config = {k: str(v) for k, v in self.config.__dict__.items()}
+        wandb.init(project='hierarchical_transformer', notes=self.config.msg, config=str_config)
+        wandb.watch(self.model)
 
         if torch.cuda.is_available() and cuda:
             self.model.cuda()
@@ -233,8 +249,10 @@ class Solver(object):
     def train(self):
         epoch_loss_history = []
 
-        #print('\n<Validation before training>...')
-        #self.validation_loss = self.evaluate()
+        print('\n<Validation before training>...')
+        self.validation_loss = self.evaluate()
+
+        min_validation_loss = float('inf')
 
         for epoch_i in range(self.epoch_i, self.config.n_epoch):
             self.epoch_i = epoch_i
@@ -256,24 +274,31 @@ class Solver(object):
                 input_histories, history_segments, target_sentences, input_sentences, input_conversation_length \
                     = self.extract_history_response(conversations)
 
+                # MAKE SURE THAT EVALUATION FUNCTION MATCHES THESE RESTRICTIONS ON INPUT SIZE!!!
+
+                # input_histories = input_histories[:self.config.max_convo_len, :self.config.max_history]
+                # history_segments = history_segments[:self.config.max_convo_len, :self.config.max_history]
+                # target_sentences = target_sentences[:self.config.max_convo_len, :self.config.max_unroll]
+
                 target_sentence_length = (target_sentences != 0).long().sum(1)
                 input_sentence_length = (input_sentences != 0).long().sum(1)
 
-                self.writer.add_scalar('batch_size', input_histories.shape[0], tb_idx)
-                self.writer.add_scalar('history_len', input_histories.shape[1], tb_idx)
-                self.writer.add_scalar('output_size', target_sentences.numel(), tb_idx)
+                # self.writer.add_scalar('batch_size', input_histories.shape[0], tb_idx)
+                # self.writer.add_scalar('history_len', input_histories.shape[1], tb_idx)
+                # self.writer.add_scalar('output_size', target_sentences.numel(), tb_idx)
+                # self.writer.add_scalar('memory_used', get_gpu_memory_used(), tb_idx)
+                wandb.log({'memory_used': get_gpu_memory_used()})
 
                 self.model.train()
                 self.optimizer.zero_grad()
 
-                #if isinstance(self.model, TRANSFORMER):
-                    # this can protect against random memory shortages
-                    # TODO reinstate upper bounds on conversation size
-                    #input_histories = input_histories[:self.config.max_convo_len, :self.config.max_unroll]
-                    #history_segments = history_segments[:self.config.max_convo_len, :self.config.max_unroll]
-                    #target_sentences = target_sentences[:self.config.max_convo_len, :self.config.max_unroll]
+                # TODO reallow HRED to be used
 
-                sentence_logits = self.model(input_histories, history_segments, target_sentences, decode=False)
+                if isinstance(self.model, MULTI):
+                    sentence_logits = self.model(input_histories, history_segments, target_sentences, decode=False)
+                else:
+                    sentence_logits = self.model(input_sentences, input_sentence_length, input_conversation_length,
+                                                 target_sentences, decode=False)
                 #else:
                 #    # TODO change back to original HRED inputs
                 #    sentence_logits = self.model(input_histories, target_sentences, decode=False)
@@ -290,7 +315,8 @@ class Solver(object):
                 # Gradient cliping
                 norm = torch.nn.utils.clip_grad_norm_(self.model.parameters(), self.config.clip)
 
-                self.writer.add_scalar('grad_norm', norm, tb_idx)
+                #self.writer.add_scalar('grad_norm', norm, tb_idx)
+                wandb.log({'grad_norm': norm})
 
                 # Run optimizer
                 self.optimizer.step()
@@ -300,14 +326,16 @@ class Solver(object):
                 n_total_words += n_words.item()
 
                 current_loss = batch_loss.item() / n_words
-                if prev_loss is None: prev_loss = current_loss
-                self.writer.add_scalar('training_loss', current_loss, tb_idx)
-                self.writer.add_scalar('Training_loss_change', current_loss - prev_loss, tb_idx)
-                prev_loss = current_loss
+                #if prev_loss is None: prev_loss = current_loss
+                #self.writer.add_scalar('training_loss', current_loss, tb_idx)
+                #self.writer.add_scalar('Training_loss_change', current_loss - prev_loss, tb_idx)
+                #prev_loss = current_loss
 
-                if batch_i % self.config.print_every == 0:
-                    tqdm.write(
-                        f'Epoch: {epoch_i+1}, iter {batch_i}: loss = {batch_loss.item()/ n_words.item():.3f}')
+                wandb.log({'train_loss': current_loss})
+
+                # if batch_i % self.config.print_every == 0:
+                #     tqdm.write(
+                #         f'Epoch: {epoch_i+1}, iter {batch_i}: loss = {batch_loss.item()/ n_words.item():.3f}')
 
             epoch_loss = np.sum(batch_loss_history) / n_total_words
             epoch_loss_history.append(epoch_loss)
@@ -316,18 +344,23 @@ class Solver(object):
             print_str = f'Epoch {epoch_i+1} loss average: {epoch_loss:.3f}'
             print(print_str)
 
-            if epoch_i % self.config.save_every_epoch == 0:
-                self.save_model(epoch_i + 1)
-
             print('\n<Valdidation>...')
             self.validation_loss = self.evaluate()
+            min_validation_loss = min(min_validation_loss, self.validation_loss)
+
+            if epoch_i % self.config.save_every_epoch == 0 and min_validation_loss == self.validation_loss:
+                print('Lowest validation loss yet. Saving')
+                self.save_model(epoch_i + 1)
 
             #if epoch_i % self.config.plot_every_epoch == 0:
                     #self.write_summary(epoch_i)
 
-        self.save_model(self.config.n_epoch)
+        #self.save_model(self.config.n_epoch)
+
+        wandb.config.update({'min_val_loss': min_validation_loss})
 
         alert.write('solver.py: Finished training')
+        print('Lowest validation loss: %s' % min_validation_loss)
 
         return epoch_loss_history
 
@@ -414,7 +447,11 @@ class Solver(object):
 
                     #gold = self.add_sos(target_sentences)
 
-                sentence_logits = self.model(input_histories, history_segments, target_sentences, decode=False)
+                if isinstance(self.model, MULTI):
+                    sentence_logits = self.model(input_histories, history_segments, target_sentences, decode=False)
+                else:
+                    sentence_logits = self.model(input_sentences, input_sentence_length, input_conversation_length,
+                                                 target_sentences, decode=False)
 
                     #batch_loss, n_words = masked_cross_entropy(sentence_logits, target_sentences, sentence_lens)
 
@@ -464,7 +501,8 @@ class Solver(object):
 
         epoch_loss = np.sum(batch_loss_history) / n_total_words
 
-        self.writer.add_scalar('val_loss', epoch_loss, self.epoch_i)
+        #self.writer.add_scalar('val_loss', epoch_loss, self.epoch_i)
+        wandb.log({'val_loss': epoch_loss})
 
         print_str = f'Validation loss: {epoch_loss:.3f}\n'
         print(print_str)

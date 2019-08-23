@@ -6,7 +6,7 @@ import numpy as np
 import sys
 sys.path.append('..') # ASSUMPTION - THIS MODULE LIES IN DIR NEXT TO TRANSFORMER DIR
 import random
-from transformer.Models import Transformer, GRUModel, GRUEncoder, MultiHeadAttentionGRUDecoder
+from transformer.Models import Transformer, MultiModel, Encoder, GRUEncoder, MultiHeadAttentionGRUDecoder
 from transformer.Translator import Translator
 from transformer.Models import batched_index_select
 from model.utils.vocab import SOS_ID
@@ -23,8 +23,7 @@ class TRANSFORMER(nn.Module):
     def __init__(self, config):
         super(TRANSFORMER, self).__init__()
         self.config = config
-        transformer_type = Transformer if not config.unet else GRUModel
-        self.transformer = transformer_type(config.vocab_size, config.vocab_size, config.max_unroll, config.encoder_hidden_size,
+        self.transformer = Transformer(config.vocab_size, config.vocab_size, config.max_history, config.encoder_hidden_size,
                                        config.encoder_hidden_size, config.encoder_hidden_size * 4, unet=config.unet,
                                             tgt_emb_prj_weight_sharing=False)
 
@@ -63,31 +62,22 @@ class TRANSFORMER(nn.Module):
         raise NotImplementedError('Generate not implemented!')
 
 
-class HRED(nn.Module):
+class MULTI(nn.Module):
     def __init__(self, config):
-        super(HRED, self).__init__()
+        super(MULTI, self).__init__()
 
         self.config = config
         # TODO revert to HRED encoder
-        print('Using local GRU encoder instead')
-        # self.encoder = layers.EncoderRNN(config.vocab_size,
-        #                                  config.embedding_size,
-        #                                  config.encoder_hidden_size,
-        #                                  config.rnn,
-        #                                  config.num_layers,
-        #                                  config.bidirectional,
-        #                                  config.dropout)
 
-        self.encoder = GRUEncoder(config.vocab_size, config.encoder_hidden_size)
+        #self.encoder = GRUEncoder(config.vocab_size, config.encoder_hidden_size)
 
-        # context_input_size = (config.num_layers
-        #                       * config.encoder_hidden_size
-        #                       * self.encoder.num_directions)
-        # self.context_encoder = layers.ContextRNN(context_input_size,
-        #                                          config.context_size,
-        #                                          config.rnn,
-        #                                          config.num_layers,
-        #                                          config.dropout)
+        # TODO restore GRU encoder
+        # self.encoder = Encoder(
+        #     n_src_vocab=config.vocab_size, len_max_seq=300,
+        #     d_word_vec=config.embedding_size, n_layers=6, n_head=8, d_k=64, d_v=64, d_model=config.encoder_hidden_size,
+        #     d_inner=config.encoder_hidden_size * 4)
+
+        #self.decoder = MultiHeadAttentionGRUDecoder(config.vocab_size, config.decoder_hidden_size, dropout=config.dropout)
 
         # self.decoder = layers.DecoderRNN(config.vocab_size,
         #                                  config.embedding_size,
@@ -100,28 +90,28 @@ class HRED(nn.Module):
         #                                  config.sample,
         #                                  config.temperature,
         #                                  config.beam_size)
+        #
+        # self.context2decoder = layers.FeedForward(config.context_size,
+        #                                           config.num_layers * config.decoder_hidden_size,
+        #                                           num_layers=1,
+        #                                           activation=config.activation)
 
-        self.decoder = MultiHeadAttentionGRUDecoder(config.vocab_size, config.decoder_hidden_size, dropout=config.dropout)
+        #self.tgt_word_prj = nn.Linear(config.decoder_hidden_size, config.vocab_size, bias=False)
 
-        self.context2decoder = layers.FeedForward(config.context_size,
-                                                  config.num_layers * config.decoder_hidden_size,
-                                                  num_layers=1,
-                                                  activation=config.activation)
+        self.gru = MultiModel(config.vocab_size, config.vocab_size, config.max_history, config.embedding_size, config.decoder_hidden_size,
+                              config.decoder_hidden_size * 4, tgt_emb_prj_weight_sharing=False, encoder=config.encoder_type,
+                              decoder=config.decoder_type)
 
-        self.tgt_word_prj = nn.Linear(config.decoder_hidden_size, config.vocab_size, bias=False)
+        # if config.tie_embedding:
+        #     # TODO undo embedding name differences
+        #     #self.decoder.embedding.weight = self.encoder.src_word_emb.weight
+        #     #self.decoder.out.weight = self.decoder.embedding.weight
+        #
+        #     self.decoder.embedding.weight = self.encoder.src_word_emb.weight
+        #     #self.tgt_word_prj.weight = self.decoder.tgt_word_emb.weight
+        #     #self.x_logit_scale = (config.decoder_hidden_size ** -0.5)
 
-        if config.tie_embedding:
-            # TODO undo embedding name differences
-            #self.decoder.embedding.weight = self.encoder.src_word_emb.weight
-            #self.decoder.out.weight = self.decoder.embedding.weight
-
-            self.decoder.tgt_word_emb.weight = self.encoder.src_word_emb.weight
-            #self.tgt_word_prj.weight = self.decoder.tgt_word_emb.weight
-            #self.x_logit_scale = (config.decoder_hidden_size ** -0.5)
-
-    #def forward(self, input_sentences, input_sentence_length,
-    #            input_conversation_length, target_sentences, decode=False):
-    def forward(self, histories, segments, target_sentences, decode=False):
+    def forward(self, histories, segments, responses, decode=False):
         """
         Args:
             input_sentences: (Variable, LongTensor) [num_sentences, seq_len]
@@ -131,94 +121,217 @@ class HRED(nn.Module):
                 - train: [batch_size, seq_len, vocab_size]
                 - eval: [batch_size, seq_len]
         """
-        # TODO revert back to old HRED
-        num_sentences = histories.shape[0]
-        #max_len = input_conversation_length.data.max().item()
+
+        responses = add_sos(responses)
+
+        history_pos = calc_pos(histories)
+        response_pos = calc_pos(responses)
+
+        logits = self.gru(histories, history_pos, responses, response_pos, flat_logits=False, src_segs=segments)
+
+        if not decode:
+            return logits
+        else:
+            batch_hyp, batch_logits = self.translator.translate_batch(histories, history_pos, src_segs=segments)
+            return batch_hyp
+        # history_length = (histories != 0).sum(1) - 1
+        #
+        # history_pos = calc_pos(histories)
+        #
+        # encoder_outputs, = self.encoder(histories, history_pos, src_segs=segments, return_attns=False)
+        # #encoder_outputs, = self.encoder(histories)
+        # encoder_hidden = batched_index_select(encoder_outputs, 1, history_length).unsqueeze(1)
+        #
+        # # [num_layers, batch_size, hidden_size]
+        # decoder_init = encoder_hidden.view(self.config.num_layers, -1, self.config.decoder_hidden_size)
+        #
+        # history_pos = calc_pos(histories)
+        #
+        # if not decode:
+        #
+        #     target_sentences = add_sos(target_sentences)[:, :-1]
+        #     #
+        #     # decoder_outputs, = self.decoder(target_sentences, history_pos, histories, decoder_init)
+        #     # seq_logit = self.tgt_word_prj(decoder_outputs)
+        #     #
+        #     # return seq_logit
+        #
+        #     decoder_outputs = self.decoder(target_sentences,
+        #                                    init_h=decoder_init,
+        #                                    decode=decode)
+        #     return decoder_outputs
+        #
+        # else:
+        #     prediction, final_score, length = self.decoder.beam_decode(init_h=decoder_init)
+        #
+        #     return prediction
+            #
+            # batch_hyp, batch_logits = self.translator.translate_batch(histories, history_pos, src_segs=segments)
+            # return batch_hyp
+
+    def generate(self, context, sentence_length, n_context):
+
+
+        # TODO allow model to generate?
+        raise NotImplementedError('Generate not implemented!')
+
+        # context: [batch_size, n_context, seq_len]
+        batch_size = context.size(0)
+        # n_context = context.size(1)
+        samples = []
+
+        # Run for context
+        context_hidden=None
+        for i in range(n_context):
+            # encoder_outputs: [batch_size, seq_len, hidden_size * direction]
+            # encoder_hidden: [num_layers * direction, batch_size, hidden_size]
+            encoder_outputs, encoder_hidden = self.encoder(context[:, i, :],
+                                                           sentence_length[:, i])
+
+            encoder_hidden = encoder_hidden.transpose(1, 0).contiguous().view(batch_size, -1)
+            # context_outputs: [batch_size, 1, context_hidden_size * direction]
+            # context_hidden: [num_layers * direction, batch_size, context_hidden_size]
+            context_outputs, context_hidden = self.context_encoder.step(encoder_hidden,
+                                                                        context_hidden)
+
+        # Run for generation
+        for j in range(self.config.n_sample_step):
+            # context_outputs: [batch_size, context_hidden_size * direction]
+            context_outputs = context_outputs.squeeze(1)
+            decoder_init = self.context2decoder(context_outputs)
+            decoder_init = decoder_init.view(self.decoder.num_layers, -1, self.decoder.hidden_size)
+
+            prediction, final_score, length = self.decoder.beam_decode(init_h=decoder_init)
+            # prediction: [batch_size, seq_len]
+            prediction = prediction[:, 0, :]
+            # length: [batch_size]
+            length = [l[0] for l in length]
+            length = to_var(torch.LongTensor(length))
+            samples.append(prediction)
+
+            encoder_outputs, encoder_hidden = self.encoder(prediction,
+                                                           length)
+
+            encoder_hidden = encoder_hidden.transpose(1, 0).contiguous().view(batch_size, -1)
+
+            context_outputs, context_hidden = self.context_encoder.step(encoder_hidden,
+                                                                        context_hidden)
+
+        samples = torch.stack(samples, 1)
+        return samples
+
+
+class HRED(nn.Module):
+    def __init__(self, config):
+        super(HRED, self).__init__()
+
+        self.config = config
+        self.encoder = layers.EncoderRNN(config.vocab_size,
+                                         config.embedding_size,
+                                         config.encoder_hidden_size,
+                                         config.rnn,
+                                         config.num_layers,
+                                         config.bidirectional,
+                                         config.dropout)
+
+        context_input_size = (config.num_layers
+                              * config.encoder_hidden_size
+                              * self.encoder.num_directions)
+        self.context_encoder = layers.ContextRNN(context_input_size,
+                                                 config.context_size,
+                                                 config.rnn,
+                                                 config.num_layers,
+                                                 config.dropout)
+
+        self.decoder = layers.DecoderRNN(config.vocab_size,
+                                         config.embedding_size,
+                                         config.decoder_hidden_size,
+                                         config.rnncell,
+                                         config.num_layers,
+                                         config.dropout,
+                                         config.word_drop,
+                                         config.max_unroll,
+                                         config.sample,
+                                         config.temperature,
+                                         config.beam_size)
+
+        self.context2decoder = layers.FeedForward(config.context_size,
+                                                  config.num_layers * config.decoder_hidden_size,
+                                                  num_layers=1,
+                                                  activation=config.activation)
+
+        if config.tie_embedding:
+            self.decoder.embedding = self.encoder.embedding
+
+    def forward(self, input_sentences, input_sentence_length,
+                input_conversation_length, target_sentences, decode=False):
+        """
+        Args:
+            input_sentences: (Variable, LongTensor) [num_sentences, seq_len]
+            target_sentences: (Variable, LongTensor) [num_sentences, seq_len]
+        Return:
+            decoder_outputs: (Variable, FloatTensor)
+                - train: [batch_size, seq_len, vocab_size]
+                - eval: [batch_size, seq_len]
+        """
+        num_sentences = input_sentences.size(0)
+        max_len = input_conversation_length.data.max().item()
 
         # encoder_outputs: [num_sentences, max_source_length, hidden_size * direction]
         # encoder_hidden: [num_layers * direction, num_sentences, hidden_size]
-
-        # TODO run encoder over all previous responses for each response in all conversations
-
-        #encoder_outputs, encoder_hidden = self.encoder(input_sentences,
-        #                                               input_sentence_length)
-
-        history_length = (histories != 0).sum(1) - 1
-        #encoder_outputs, encoder_hidden = self.encoder(histories, history_length)
-        encoder_outputs, = self.encoder(histories)
-        encoder_hidden = batched_index_select(encoder_outputs, 1, history_length).unsqueeze(1)
+        encoder_outputs, encoder_hidden = self.encoder(input_sentences,
+                                                       input_sentence_length)
 
         # encoder_hidden: [num_sentences, num_layers * direction * hidden_size]
-        #encoder_hidden = encoder_hidden.transpose(1, 0).contiguous().view(num_sentences, -1)
+        encoder_hidden = encoder_hidden.transpose(1, 0).contiguous().view(num_sentences, -1)
 
         # pad and pack encoder_hidden
-        #start = torch.cumsum(torch.cat((to_var(input_conversation_length.data.new(1).zero_()),
-        #                                input_conversation_length[:-1])), 0)
-        # encoder_hidden: [batch_size, max_len, num_layers * direction * hidden_size]
-        #encoder_hidden = torch.stack([pad(encoder_hidden.narrow(0, s, l), max_len)
-        #                              for s, l in zip(start.data.tolist(),
-        #                                              input_conversation_length.data.tolist())], 0)
+        start = torch.cumsum(torch.cat((to_var(input_conversation_length.data.new(1).zero_()),
+                                        input_conversation_length[:-1])), 0)
 
-        # TODO run context over all previous responses for each response in all conversations
+        # encoder_hidden: [batch_size, max_len, num_layers * direction * hidden_size]
+        encoder_hidden = torch.stack([pad(encoder_hidden.narrow(0, s, l), max_len)
+                                      for s, l in zip(start.data.tolist(),
+                                                      input_conversation_length.data.tolist())], 0)
 
         # context_outputs: [batch_size, max_len, context_size]
-        #context_outputs, context_last_hidden = self.context_encoder(encoder_hidden,
-        #                                                            input_conversation_length)
-
-        # TODO grab context outputs for each final response
+        context_outputs, context_last_hidden = self.context_encoder(encoder_hidden,
+                                                                    input_conversation_length)
 
         # flatten outputs
         # context_outputs: [num_sentences, context_size]
-        # this grabs all non-zero context outputse
-        #context_outputs = torch.cat([context_outputs[i, :l, :]
-        #                             for i, l in enumerate(input_conversation_length.data)])
-
-        context_outputs = encoder_hidden
+        context_outputs = torch.cat([context_outputs[i, :l, :]
+                                     for i, l in enumerate(input_conversation_length.data)])
 
         # project context_outputs to decoder init state
-        decoder_init = context_outputs  # self.context2decoder(context_outputs)
+        decoder_init = self.context2decoder(context_outputs)
 
         # [num_layers, batch_size, hidden_size]
-        decoder_init = decoder_init.view(self.config.num_layers, -1, self.config.decoder_hidden_size)
+        decoder_init = decoder_init.view(self.decoder.num_layers, -1, self.decoder.hidden_size)
 
         # train: [batch_size, seq_len, vocab_size]
         # eval: [batch_size, seq_len]
-
-        history_pos = calc_pos(histories)
-
         if not decode:
 
-            target_sentences = add_sos(target_sentences)[:, :-1]
-
-            # decoder_outputs = self.decoder(target_sentences,
-            #                                init_h=decoder_init,
-            #                                encoder_outputs=encoder_outputs,
-            #                                decode=decode)
-            # return decoder_outputs
-
-            decoder_outputs, = self.decoder(target_sentences, history_pos, histories, decoder_init)
-            seq_logit = self.tgt_word_prj(decoder_outputs)
-
-            return seq_logit
+            decoder_outputs = self.decoder(target_sentences,
+                                           init_h=decoder_init,
+                                           decode=decode)
+            return decoder_outputs
 
         else:
-            pass
             # decoder_outputs = self.decoder(target_sentences,
             #                                init_h=decoder_init,
             #                                decode=decode)
             # return decoder_outputs.unsqueeze(1)
-            #prediction: [batch_size, beam_size, max_unroll]
-            #prediction, final_score, length = self.decoder.beam_decode(init_h=decoder_init)
-            # return prediction
-
-            batch_hyp, batch_logits = self.translator.translate_batch(histories, history_pos, src_segs=segments)
-            return batch_hyp
+            # prediction: [batch_size, beam_size, max_unroll]
+            prediction, final_score, length = self.decoder.beam_decode(init_h=decoder_init)
 
             # Get top prediction only
             # [batch_size, max_unroll]
             # prediction = prediction[:, 0]
-            #
+
             # [batch_size, beam_size, max_unroll]
+            return prediction
 
     def generate(self, context, sentence_length, n_context):
         # context: [batch_size, n_context, seq_len]

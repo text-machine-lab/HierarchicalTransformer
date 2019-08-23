@@ -216,6 +216,8 @@ class DecoderRNN(BaseRNNDecoder):
                  max_unroll=30, sample=True, temperature=1.0, beam_size=1):
         super(DecoderRNN, self).__init__()
 
+        # CERTAIN PARAMETERS NO LONGER USED!!!
+
         self.vocab_size = vocab_size
         self.embedding_size = embedding_size
         self.hidden_size = hidden_size
@@ -285,10 +287,11 @@ class DecoderRNN(BaseRNNDecoder):
             Return:
                 out   : [batch_size, seq_len]
         """
-        #batch_size = self.batch_size(inputs, init_h)
+        batch_size = self.batch_size(inputs, init_h)
 
         # x: [batch_size]
-        #x = self.init_token(batch_size, SOS_ID)
+        x = self.init_token(batch_size, SOS_ID)
+        x = self.embedding(x)
 
         # h: [num_layers, batch_size, hidden_size]
         h = init_h.squeeze(0)  # self.init_h(batch_size, hidden=init_h).squeeze(0)
@@ -299,7 +302,6 @@ class DecoderRNN(BaseRNNDecoder):
             out_list = []
             seq_len = inputs.size(1)
             for i in range(seq_len):
-                x = inputs[:, i]
                 # x: [batch_size]
                 # =>
                 # out: [batch_size, vocab_size]
@@ -307,6 +309,8 @@ class DecoderRNN(BaseRNNDecoder):
                 h = self.rnncell(x, h)
 
                 out_list.append(h)
+
+                x = inputs[:, i]
 
             # [batch_size, max_target_len, vocab_size]
             hs = torch.stack(out_list, dim=1)
