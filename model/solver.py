@@ -282,8 +282,10 @@ class Solver(object):
 
                     # MAKE SURE THAT EVALUATION FUNCTION MATCHES THESE RESTRICTIONS ON INPUT SIZE!!!
 
-                    # input_histories = input_histories[:self.config.max_convo_len, :self.config.max_history]
-                    # history_segments = history_segments[:self.config.max_convo_len, :self.config.max_history]
+                    wandb.log({'hist_max_len': (input_histories != 0).float().sum(1).max()})
+
+                    input_histories = input_histories[:, :self.config.max_history]
+                    history_segments = history_segments[:, :self.config.max_history]
                     # target_sentences = target_sentences[:self.config.max_convo_len, :self.config.max_unroll]
 
                     target_sentence_length = (target_sentences != 0).long().sum(1)
@@ -459,8 +461,8 @@ class Solver(object):
                 #if isinstance(self.model, TRANSFORMER):
 
                     # this can protect against random memory shortages
-                    # input_histories = input_histories[:self.config.max_convo_len, :self.config.max_unroll]
-                    # history_segments = history_segments[:self.config.max_convo_len, :self.config.max_unroll]
+                input_histories = input_histories[:, :self.config.max_history]
+                history_segments = history_segments[:, :self.config.max_history]
                     # target_sentences = target_sentences[:self.config.max_convo_len, :self.config.max_unroll]
 
                     #gold = self.add_sos(target_sentences)
@@ -515,6 +517,9 @@ class Solver(object):
 
                 target_sentence_length = (target_sentences != 0).long().sum(1)
                 input_sentence_length = (input_sentences != 0).long().sum(1)
+
+                input_histories = input_histories[:, :self.config.max_history]
+                history_segments = history_segments[:, :self.config.max_history]
 
                 #if isinstance(self.model, TRANSFORMER):
 
