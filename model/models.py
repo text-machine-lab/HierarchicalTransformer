@@ -19,47 +19,47 @@ def add_sos(x):
     gold = torch.cat([sos_id, x], 1)
     return gold
 
-class TRANSFORMER(nn.Module):
-    def __init__(self, config):
-        super(TRANSFORMER, self).__init__()
-        self.config = config
-        self.transformer = Transformer(config.vocab_size, config.vocab_size, config.max_history, config.encoder_hidden_size,
-                                       config.encoder_hidden_size, config.encoder_hidden_size * 4, unet=config.unet,
-                                            tgt_emb_prj_weight_sharing=False)
-
-        # TODO try removing weight sharing
-        self.translator = Translator(model=self.transformer, beam_size=config.beam_size, max_seq_len=config.gen_response_len)
-
-    def forward(self, histories, segments, responses, decode=False):
-        """
-        Args:
-            histories: (LongTensor) [batch_size, convo_len, seq_len]
-            responses: (LongTensor) [batch_size, seq_len]
-        Return:
-            decoder_outputs: (FloatTensor)
-                - train: [batch_size, seq_len, vocab_size]
-                - eval: [batch_size, seq_len]
-        """
-
-        # calculate position vectors to locate each token
-        # padding tokens set to zero
-
-        # HERE WE ADD GO TOKEN
-        responses = add_sos(responses)
-
-        history_pos = calc_pos(histories)
-        response_pos = calc_pos(responses)
-
-        logits = self.transformer(histories, history_pos, responses, response_pos, flat_logits=False, src_segs=segments)
-
-        if not decode:
-            return logits
-        else:
-            batch_hyp, batch_logits = self.translator.translate_batch(histories, history_pos, src_segs=segments)
-            return batch_hyp
-
-    def generate(self, context, sentence_length, n_context):
-        raise NotImplementedError('Generate not implemented!')
+# class TRANSFORMER(nn.Module):
+#     def __init__(self, config):
+#         super(TRANSFORMER, self).__init__()
+#         self.config = config
+#         self.transformer = Transformer(config.vocab_size, config.vocab_size, config.max_history, config.encoder_hidden_size,
+#                                        config.encoder_hidden_size, config.encoder_hidden_size * 4, unet=config.unet,
+#                                             tgt_emb_prj_weight_sharing=False)
+#
+#         # TODO try removing weight sharing
+#         self.translator = Translator(model=self.transformer, beam_size=config.beam_size, max_seq_len=config.gen_response_len)
+#
+#     def forward(self, histories, segments, responses, decode=False):
+#         """
+#         Args:
+#             histories: (LongTensor) [batch_size, convo_len, seq_len]
+#             responses: (LongTensor) [batch_size, seq_len]
+#         Return:
+#             decoder_outputs: (FloatTensor)
+#                 - train: [batch_size, seq_len, vocab_size]
+#                 - eval: [batch_size, seq_len]
+#         """
+#
+#         # calculate position vectors to locate each token
+#         # padding tokens set to zero
+#
+#         # HERE WE ADD GO TOKEN
+#         responses = add_sos(responses)
+#
+#         history_pos = calc_pos(histories)
+#         response_pos = calc_pos(responses)
+#
+#         logits = self.transformer(histories, history_pos, responses, response_pos, flat_logits=False, src_segs=segments)
+#
+#         if not decode:
+#             return logits
+#         else:
+#             batch_hyp, batch_logits = self.translator.translate_batch(histories, history_pos, src_segs=segments)
+#             return batch_hyp
+#
+#     def generate(self, context, sentence_length, n_context):
+#         raise NotImplementedError('Generate not implemented!')
 
 
 class MULTI(nn.Module):

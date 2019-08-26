@@ -18,7 +18,7 @@ import re
 import math
 import pickle
 import gensim
-from models import TRANSFORMER, MULTI
+from models import MULTI
 
 import wandb
 
@@ -53,11 +53,12 @@ class MyDataParallel(torch.nn.DataParallel):
             return getattr(self.module, name)
 
 class Solver(object):
-    def __init__(self, config, train_data_loader, eval_data_loader, vocab, is_train=True, model=None, parallel=True):
+    def __init__(self, config, train_data_loader, eval_data_loader, test_data_loader, vocab, is_train=True, model=None, parallel=True):
         self.config = config
         self.epoch_i = 0
         self.train_data_loader = train_data_loader
         self.eval_data_loader = eval_data_loader
+        self.test_data_loader = test_data_loader
         self.vocab = vocab
         self.parallel = parallel
         self.is_train = is_train
@@ -250,10 +251,14 @@ class Solver(object):
         epoch_loss_history = []
 
         print('\n<Validation before training>...')
-        self.validation_loss = self.evaluate()
+        #self.validation_loss = self.evaluate()
+
+        #word_perplexity = self.test()
 
         min_validation_loss = float('inf')
+        min_val_loss_epoch = -1
 
+        print('Training start')
         for epoch_i in range(self.epoch_i, self.config.n_epoch):
             self.epoch_i = epoch_i
             batch_loss_history = []
@@ -269,25 +274,25 @@ class Solver(object):
                 for c in range(len(conversations)):
                     assert len(conversations[c]) == conversation_length[c]
 
-                tb_idx = len(self.train_data_loader) * epoch_i + batch_i  # always increments on every loop
+                # tb_idx = len(self.train_data_loader) * epoch_i + batch_i  # always increments on every loop
 
-                input_histories, history_segments, target_sentences, input_sentences, input_conversation_length \
-                    = self.extract_history_response(conversations)
+                with torch.no_grad():
+                    input_histories, history_segments, target_sentences, input_sentences, input_conversation_length \
+                        = self.extract_history_response(conversations)
 
-                # MAKE SURE THAT EVALUATION FUNCTION MATCHES THESE RESTRICTIONS ON INPUT SIZE!!!
+                    # MAKE SURE THAT EVALUATION FUNCTION MATCHES THESE RESTRICTIONS ON INPUT SIZE!!!
 
-                # input_histories = input_histories[:self.config.max_convo_len, :self.config.max_history]
-                # history_segments = history_segments[:self.config.max_convo_len, :self.config.max_history]
-                # target_sentences = target_sentences[:self.config.max_convo_len, :self.config.max_unroll]
+                    # input_histories = input_histories[:self.config.max_convo_len, :self.config.max_history]
+                    # history_segments = history_segments[:self.config.max_convo_len, :self.config.max_history]
+                    # target_sentences = target_sentences[:self.config.max_convo_len, :self.config.max_unroll]
 
-                target_sentence_length = (target_sentences != 0).long().sum(1)
-                input_sentence_length = (input_sentences != 0).long().sum(1)
+                    target_sentence_length = (target_sentences != 0).long().sum(1)
+                    input_sentence_length = (input_sentences != 0).long().sum(1)
 
                 # self.writer.add_scalar('batch_size', input_histories.shape[0], tb_idx)
                 # self.writer.add_scalar('history_len', input_histories.shape[1], tb_idx)
                 # self.writer.add_scalar('output_size', target_sentences.numel(), tb_idx)
                 # self.writer.add_scalar('memory_used', get_gpu_memory_used(), tb_idx)
-                wandb.log({'memory_used': get_gpu_memory_used()})
 
                 self.model.train()
                 self.optimizer.zero_grad()
@@ -308,6 +313,8 @@ class Solver(object):
                     sentence_logits,
                     target_sentences,
                     target_sentence_length)
+
+                wandb.log({'memory_used': get_gpu_memory_used()})
 
                 # Back-propagation
                 batch_loss.backward()
@@ -344,11 +351,13 @@ class Solver(object):
             print_str = f'Epoch {epoch_i+1} loss average: {epoch_loss:.3f}'
             print(print_str)
 
-            print('\n<Valdidation>...')
+            print('\n<Validation>...')
             self.validation_loss = self.evaluate()
-            min_validation_loss = min(min_validation_loss, self.validation_loss)
+            if self.validation_loss <= min_validation_loss:
+                min_validation_loss = self.validation_loss
+                min_val_loss_epoch = epoch_i
 
-            if epoch_i % self.config.save_every_epoch == 0 and min_validation_loss == self.validation_loss:
+            if min_validation_loss == self.validation_loss:
                 print('Lowest validation loss yet. Saving')
                 self.save_model(epoch_i + 1)
 
@@ -357,10 +366,19 @@ class Solver(object):
 
         #self.save_model(self.config.n_epoch)
 
+        print('Loading model from lowest validation epoch')
+        ckpt_path = os.path.join(self.config.save_path, f'{min_val_loss_epoch + 1}.pkl')
+        self.load_model(ckpt_path)
+
         wandb.config.update({'min_val_loss': min_validation_loss})
 
         alert.write('solver.py: Finished training')
         print('Lowest validation loss: %s' % min_validation_loss)
+
+        print('Evaluating on test set')
+        word_perplexity = self.test()
+
+        wandb.config.update({'test perplexity': word_perplexity})
 
         return epoch_loss_history
 
@@ -459,36 +477,6 @@ class Solver(object):
                 #if batch_i == 0:
                 #    self.generate_transformer_sentence(input_histories, history_segments, target_sentences)
 
-                #else:
-                    # input_conversations = [conv[:-1] for conv in conversations]
-                    # target_conversations = [conv[1:] for conv in conversations]
-                    #
-                    # # flatten input and target conversations
-                    # input_sentences = [sent for conv in input_conversations for sent in conv]
-                    # target_sentences = [sent for conv in target_conversations for sent in conv]
-                    # input_sentence_length = [l for len_list in sentence_length for l in len_list[:-1]]
-                    # target_sentence_length = [l for len_list in sentence_length for l in len_list[1:]]
-                    # input_conversation_length = [l - 1 for l in conversation_length]
-                    #
-                    #
-                    # input_sentences = to_var(torch.LongTensor(input_sentences))
-                    # target_sentences = to_var(torch.LongTensor(target_sentences))
-                    # input_sentence_length = to_var(torch.LongTensor(input_sentence_length))
-                    # target_sentence_length = to_var(torch.LongTensor(target_sentence_length))
-                    # input_conversation_length = to_var(
-                    #     torch.LongTensor(input_conversation_length))
-
-                    #if batch_i == 0:
-                    #    self.generate_sentence(input_sentences,
-                    #                           input_sentence_length,
-                    #                           input_conversation_length,
-                    #                           target_sentences)
-
-                    #sentence_logits = self.model(
-                    #    input_sentences,
-                    #    input_sentence_length,
-                    #    input_conversation_length,
-                    #    target_sentences)
 
                 batch_loss, n_words = masked_cross_entropy(
                     sentence_logits,
@@ -513,40 +501,47 @@ class Solver(object):
         self.model.eval()
         batch_loss_history = []
         n_total_words = 0
-        for batch_i, (conversations, conversation_length, sentence_length) in enumerate(tqdm(self.eval_data_loader, ncols=80)):
+        for batch_i, (conversations, conversation_length, sentence_length) in enumerate(tqdm(self.test_data_loader, ncols=80)):
             # conversations: (batch_size) list of conversations
             #   conversation: list of sentences
             #   sentence: list of tokens
             # conversation_length: list of int
             # sentence_length: (batch_size) list of conversation list of sentence_lengths
 
-            input_conversations = [conv[:-1] for conv in conversations]
-            target_conversations = [conv[1:] for conv in conversations]
-
-            # flatten input and target conversations
-            input_sentences = [sent for conv in input_conversations for sent in conv]
-            target_sentences = [sent for conv in target_conversations for sent in conv]
-            input_sentence_length = [l for len_list in sentence_length for l in len_list[:-1]]
-            target_sentence_length = [l for len_list in sentence_length for l in len_list[1:]]
-            input_conversation_length = [l - 1 for l in conversation_length]
-
             with torch.no_grad():
-                input_sentences = to_var(torch.LongTensor(input_sentences))
-                target_sentences = to_var(torch.LongTensor(target_sentences))
-                input_sentence_length = to_var(torch.LongTensor(input_sentence_length))
-                target_sentence_length = to_var(torch.LongTensor(target_sentence_length))
-                input_conversation_length = to_var(torch.LongTensor(input_conversation_length))
 
-            sentence_logits = self.model(
-                input_sentences,
-                input_sentence_length,
-                input_conversation_length,
-                target_sentences)
+                input_histories, history_segments, target_sentences, input_sentences, input_conversation_length \
+                    = self.extract_history_response(conversations)
 
-            batch_loss, n_words = masked_cross_entropy(
-                sentence_logits,
-                target_sentences,
-                target_sentence_length)
+                target_sentence_length = (target_sentences != 0).long().sum(1)
+                input_sentence_length = (input_sentences != 0).long().sum(1)
+
+                #if isinstance(self.model, TRANSFORMER):
+
+                    # this can protect against random memory shortages
+                    # input_histories = input_histories[:self.config.max_convo_len, :self.config.max_unroll]
+                    # history_segments = history_segments[:self.config.max_convo_len, :self.config.max_unroll]
+                    # target_sentences = target_sentences[:self.config.max_convo_len, :self.config.max_unroll]
+
+                    #gold = self.add_sos(target_sentences)
+
+                if isinstance(self.model, MULTI):
+                    sentence_logits = self.model(input_histories, history_segments, target_sentences, decode=False)
+                else:
+                    sentence_logits = self.model(input_sentences, input_sentence_length, input_conversation_length,
+                                                 target_sentences, decode=False)
+
+                    #batch_loss, n_words = masked_cross_entropy(sentence_logits, target_sentences, sentence_lens)
+
+                # TODO allow generation from HRED
+                #if batch_i == 0:
+                #    self.generate_transformer_sentence(input_histories, history_segments, target_sentences)
+
+
+                batch_loss, n_words = masked_cross_entropy(
+                    sentence_logits,
+                    target_sentences,
+                    target_sentence_length)
 
             assert not isnan(batch_loss.item())
             batch_loss_history.append(batch_loss.item())
@@ -640,11 +635,12 @@ class Solver(object):
 
 class VariationalSolver(Solver):
 
-    def __init__(self, config, train_data_loader, eval_data_loader, vocab, is_train=True, model=None):
+    def __init__(self, config, train_data_loader, eval_data_loader, test_data_loader, vocab, is_train=True, model=None):
         self.config = config
         self.epoch_i = 0
         self.train_data_loader = train_data_loader
         self.eval_data_loader = eval_data_loader
+        self.test_data_loader = test_data_loader
         self.vocab = vocab
         self.is_train = is_train
         self.model = model

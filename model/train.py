@@ -14,6 +14,7 @@ def load_pickle(path):
 if __name__ == '__main__':
     config = get_config(mode='train')
     val_config = get_config(mode='valid')
+    test_config = get_config(mode='test')
     print(config)
     with open(os.path.join(config.save_path, 'config.txt'), 'w') as f:
         print(config, file=f)
@@ -42,6 +43,15 @@ if __name__ == '__main__':
         max_examples=config.max_examples,
         shuffle=False)
 
+    test_data_loader = get_loader(
+        sentences=load_pickle(test_config.sentences_path),
+        conversation_length=load_pickle(test_config.conversation_length_path),
+        sentence_length=load_pickle(test_config.sentence_length_path),
+        vocab=vocab,
+        batch_size=test_config.eval_batch_size,
+        max_examples=config.max_examples,
+        shuffle=False)
+
     # for testing
     # train_data_loader = eval_data_loader
     if config.model in VariationalModels:
@@ -52,7 +62,7 @@ if __name__ == '__main__':
     print('Num train batches: %s' % len(train_data_loader))
     print('Num valid batches: %s' % len(eval_data_loader))
 
-    solver = solver(config, train_data_loader, eval_data_loader, vocab=vocab, is_train=True)
+    solver = solver(config, train_data_loader, eval_data_loader, test_data_loader, vocab=vocab, is_train=True)
 
     solver.build()
     solver.train()

@@ -1,3 +1,3 @@
-python train.py --data=cornell --model=HRED --batch_size=32 --n_epoch=1000 --eval_batch_size=32 \
-   --encoder_hidden_size=256 --decoder_hidden_size=256  --embedding_size=256 --context_size=256 \
-   --encoder_type='gru' --decoder_type='gru'
+python train.py --data=ubuntu --model=MULTI --batch_size=32 --n_epoch=1 --eval_batch_size=32 \
+   --encoder_hidden_size=128 --decoder_hidden_size=128  --embedding_size=128 --context_size=128 \
+   --encoder_type='transformer' --decoder_type='transformer'  --msg='dev' --max_history=300
