@@ -274,8 +274,6 @@ class Solver(object):
                 for c in range(len(conversations)):
                     assert len(conversations[c]) == conversation_length[c]
 
-                # tb_idx = len(self.train_data_loader) * epoch_i + batch_i  # always increments on every loop
-
                 with torch.no_grad():
                     input_histories, history_segments, target_sentences, input_sentences, input_conversation_length \
                         = self.extract_history_response(conversations)
@@ -284,32 +282,23 @@ class Solver(object):
 
                     wandb.log({'hist_max_len': (input_histories != 0).float().sum(1).max()})
 
+                    # TODO right align input histories and prune from left
+
                     input_histories = input_histories[:, :self.config.max_history]
                     history_segments = history_segments[:, :self.config.max_history]
-                    # target_sentences = target_sentences[:self.config.max_convo_len, :self.config.max_unroll]
 
                     target_sentence_length = (target_sentences != 0).long().sum(1)
                     input_sentence_length = (input_sentences != 0).long().sum(1)
 
-                # self.writer.add_scalar('batch_size', input_histories.shape[0], tb_idx)
-                # self.writer.add_scalar('history_len', input_histories.shape[1], tb_idx)
-                # self.writer.add_scalar('output_size', target_sentences.numel(), tb_idx)
-                # self.writer.add_scalar('memory_used', get_gpu_memory_used(), tb_idx)
-
                 self.model.train()
                 self.optimizer.zero_grad()
 
-                # TODO reallow HRED to be used
 
                 if isinstance(self.model, MULTI):
                     sentence_logits = self.model(input_histories, history_segments, target_sentences, decode=False)
                 else:
                     sentence_logits = self.model(input_sentences, input_sentence_length, input_conversation_length,
                                                  target_sentences, decode=False)
-                #else:
-                #    # TODO change back to original HRED inputs
-                #    sentence_logits = self.model(input_histories, target_sentences, decode=False)
-                    #sentence_logits = self.model(input_sentences, input_sentence_length, input_conversation_length, target_sentences, decode=False)
 
                 batch_loss, n_words = masked_cross_entropy(
                     sentence_logits,
@@ -320,6 +309,8 @@ class Solver(object):
 
                 # Back-propagation
                 batch_loss.backward()
+
+                wandb.log({'word_grad': self.model.model.encoder.src_word_emb.weight.grad.abs().mean()})
 
                 # Gradient cliping
                 norm = torch.nn.utils.clip_grad_norm_(self.model.parameters(), self.config.clip)

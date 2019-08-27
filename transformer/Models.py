@@ -9,6 +9,7 @@ import transformer.Constants as Constants
 from transformer.Layers import UNetEncoderLayer, EncoderLayer, DecoderLayer
 from transformer.SubLayers import MultiHeadAttention
 from model.utils.vocab import SOS_ID
+import wandb
 
 __author__ = "Yu-Hsiang Huang"
 
@@ -84,9 +85,13 @@ class Encoder(nn.Module):
 
         self.seg_enc = nn.Embedding(len_max_seq, d_word_vec, padding_idx=Constants.PAD)
 
+        # TODO refreeze positional embeddings
+
         self.position_enc = nn.Embedding.from_pretrained(
             get_sinusoid_encoding_table(n_position, d_word_vec, padding_idx=0),
             freeze=True)
+
+        #self.position_bias = nn.Parameter(torch.ones(1, 1, d_word_vec))
 
         self.layer_stack = nn.ModuleList([
             EncoderLayer(d_model, d_inner, n_head, d_k, d_v, dropout=dropout)
@@ -100,12 +105,14 @@ class Encoder(nn.Module):
 
         # -- Forward
         enc_output = self.src_word_emb(src_seq)
-        enc_output = enc_output + self.position_enc(src_pos)
+
+        wandb.log({'word_emb_std': enc_output.std()})
+
+        enc_output = enc_output + self.position_enc(src_pos) # * self.position_bias
 
         if src_segs is not None:
             enc_output = enc_output + self.seg_enc(src_segs)
 
-        word_input = enc_output
         enc_slf_attn_list = []
         for encoder_layer in self.layer_stack:
             enc_output, enc_slf_attn = encoder_layer(

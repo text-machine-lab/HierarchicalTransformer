@@ -98,9 +98,9 @@ class MULTI(nn.Module):
 
         #self.tgt_word_prj = nn.Linear(config.decoder_hidden_size, config.vocab_size, bias=False)
 
-        self.gru = MultiModel(config.vocab_size, config.vocab_size, config.max_history, config.embedding_size, config.decoder_hidden_size,
+        self.model = MultiModel(config.vocab_size, config.vocab_size, config.max_history, config.embedding_size, config.decoder_hidden_size,
                               config.decoder_hidden_size * 4, tgt_emb_prj_weight_sharing=False, encoder=config.encoder_type,
-                              decoder=config.decoder_type)
+                              decoder=config.decoder_type, n_layers=config.num_layers)
 
         # if config.tie_embedding:
         #     # TODO undo embedding name differences
@@ -127,7 +127,7 @@ class MULTI(nn.Module):
         history_pos = calc_pos(histories)
         response_pos = calc_pos(responses)
 
-        logits = self.gru(histories, history_pos, responses, response_pos, flat_logits=False, src_segs=segments)
+        logits = self.model(histories, history_pos, responses, response_pos, flat_logits=False, src_segs=segments)
 
         if not decode:
             return logits
@@ -169,56 +169,56 @@ class MULTI(nn.Module):
             # batch_hyp, batch_logits = self.translator.translate_batch(histories, history_pos, src_segs=segments)
             # return batch_hyp
 
-    def generate(self, context, sentence_length, n_context):
-
-
-        # TODO allow model to generate?
-        raise NotImplementedError('Generate not implemented!')
-
-        # context: [batch_size, n_context, seq_len]
-        batch_size = context.size(0)
-        # n_context = context.size(1)
-        samples = []
-
-        # Run for context
-        context_hidden=None
-        for i in range(n_context):
-            # encoder_outputs: [batch_size, seq_len, hidden_size * direction]
-            # encoder_hidden: [num_layers * direction, batch_size, hidden_size]
-            encoder_outputs, encoder_hidden = self.encoder(context[:, i, :],
-                                                           sentence_length[:, i])
-
-            encoder_hidden = encoder_hidden.transpose(1, 0).contiguous().view(batch_size, -1)
-            # context_outputs: [batch_size, 1, context_hidden_size * direction]
-            # context_hidden: [num_layers * direction, batch_size, context_hidden_size]
-            context_outputs, context_hidden = self.context_encoder.step(encoder_hidden,
-                                                                        context_hidden)
-
-        # Run for generation
-        for j in range(self.config.n_sample_step):
-            # context_outputs: [batch_size, context_hidden_size * direction]
-            context_outputs = context_outputs.squeeze(1)
-            decoder_init = self.context2decoder(context_outputs)
-            decoder_init = decoder_init.view(self.decoder.num_layers, -1, self.decoder.hidden_size)
-
-            prediction, final_score, length = self.decoder.beam_decode(init_h=decoder_init)
-            # prediction: [batch_size, seq_len]
-            prediction = prediction[:, 0, :]
-            # length: [batch_size]
-            length = [l[0] for l in length]
-            length = to_var(torch.LongTensor(length))
-            samples.append(prediction)
-
-            encoder_outputs, encoder_hidden = self.encoder(prediction,
-                                                           length)
-
-            encoder_hidden = encoder_hidden.transpose(1, 0).contiguous().view(batch_size, -1)
-
-            context_outputs, context_hidden = self.context_encoder.step(encoder_hidden,
-                                                                        context_hidden)
-
-        samples = torch.stack(samples, 1)
-        return samples
+    # def generate(self, context, sentence_length, n_context):
+    #
+    #
+    #     # TODO allow model to generate?
+    #     raise NotImplementedError('Generate not implemented!')
+    #
+    #     # context: [batch_size, n_context, seq_len]
+    #     batch_size = context.size(0)
+    #     # n_context = context.size(1)
+    #     samples = []
+    #
+    #     # Run for context
+    #     context_hidden=None
+    #     for i in range(n_context):
+    #         # encoder_outputs: [batch_size, seq_len, hidden_size * direction]
+    #         # encoder_hidden: [num_layers * direction, batch_size, hidden_size]
+    #         encoder_outputs, encoder_hidden = self.encoder(context[:, i, :],
+    #                                                        sentence_length[:, i])
+    #
+    #         encoder_hidden = encoder_hidden.transpose(1, 0).contiguous().view(batch_size, -1)
+    #         # context_outputs: [batch_size, 1, context_hidden_size * direction]
+    #         # context_hidden: [num_layers * direction, batch_size, context_hidden_size]
+    #         context_outputs, context_hidden = self.context_encoder.step(encoder_hidden,
+    #                                                                     context_hidden)
+    #
+    #     # Run for generation
+    #     for j in range(self.config.n_sample_step):
+    #         # context_outputs: [batch_size, context_hidden_size * direction]
+    #         context_outputs = context_outputs.squeeze(1)
+    #         decoder_init = self.context2decoder(context_outputs)
+    #         decoder_init = decoder_init.view(self.decoder.num_layers, -1, self.decoder.hidden_size)
+    #
+    #         prediction, final_score, length = self.decoder.beam_decode(init_h=decoder_init)
+    #         # prediction: [batch_size, seq_len]
+    #         prediction = prediction[:, 0, :]
+    #         # length: [batch_size]
+    #         length = [l[0] for l in length]
+    #         length = to_var(torch.LongTensor(length))
+    #         samples.append(prediction)
+    #
+    #         encoder_outputs, encoder_hidden = self.encoder(prediction,
+    #                                                        length)
+    #
+    #         encoder_hidden = encoder_hidden.transpose(1, 0).contiguous().view(batch_size, -1)
+    #
+    #         context_outputs, context_hidden = self.context_encoder.step(encoder_hidden,
+    #                                                                     context_hidden)
+    #
+    #     samples = torch.stack(samples, 1)
+    #     return samples
 
 
 class HRED(nn.Module):
