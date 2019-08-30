@@ -34,9 +34,9 @@ class MultiHeadAttention(nn.Module):
         nn.init.normal_(self.w_ks.weight, mean=0, std=np.sqrt(2.0 / (d_in + d_k)))
         nn.init.normal_(self.w_vs.weight, mean=0, std=np.sqrt(2.0 / (d_in + d_v)))
 
-        #nn.init.normal_(self.w_qs.weight, mean=0, std=1.0 / (d_out + d_k))
-        #nn.init.normal_(self.w_ks.weight, mean=0, std=1.0 / (d_in + d_k))
-        #nn.init.normal_(self.w_vs.weight, mean=0, std=1.0 / (d_in + d_v))
+        #nn.init.normal_(self.w_qs.weight, mean=0, std=1 / (d_out + d_k))
+        #nn.init.normal_(self.w_ks.weight, mean=0, std=1 / (d_in + d_k))
+        #nn.init.normal_(self.w_vs.weight, mean=0, std=1 / (d_in + d_v))
 
         # set all biases to zero
         #nn.init.zeros_(self.w_qs.bias)
@@ -46,8 +46,12 @@ class MultiHeadAttention(nn.Module):
         self.attention = ScaledDotProductAttention(temperature=np.power(d_k, 0.5))
         self.layer_norm = nn.LayerNorm(d_out)
 
+        # TODO undo this
         self.fc = nn.Linear(n_head * d_v, d_out)
-        nn.init.xavier_normal_(self.fc.weight)
+        #nn.init.xavier_normal_(self.fc.weight)
+        #nn.init.normal_(self.fc.weight, mean=0, std=1 / d_out)
+        nn.init.xavier_normal_(self.fc.weight, gain=1/100)
+        nn.init.zeros_(self.fc.bias)
 
         self.dropout = nn.Dropout(dropout)
 
@@ -89,10 +93,11 @@ class PositionwiseFeedForward(nn.Module):
         self.w_2 = nn.Conv1d(d_hid, d_in, 1) # position-wise
 
         # TODO remove these special initializations
-        #nn.init.normal_(self.w_1.weight, mean=0, std=1.0/d_in)
-        #nn.init.normal_(self.w_2.weight, mean=0, std=1.0/d_hid)
+        #nn.init.normal_(self.w_1.weight, mean=0, std=1 / d_in)
+        #nn.init.normal_(self.w_2.weight, mean=0, std=1 / d_hid)
+        nn.init.xavier_normal_(self.w_2.weight, gain=1/100)
         #nn.init.zeros_(self.w_1.bias)
-        #nn.init.zeros_(self.w_2.bias)
+        nn.init.zeros_(self.w_2.bias)
 
         self.layer_norm = nn.LayerNorm(d_in)
         self.dropout = nn.Dropout(dropout)

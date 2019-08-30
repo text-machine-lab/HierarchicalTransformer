@@ -27,7 +27,6 @@ def add_sos(x):
 #                                        config.encoder_hidden_size, config.encoder_hidden_size * 4, unet=config.unet,
 #                                             tgt_emb_prj_weight_sharing=False)
 #
-#         # TODO try removing weight sharing
 #         self.translator = Translator(model=self.transformer, beam_size=config.beam_size, max_seq_len=config.gen_response_len)
 #
 #     def forward(self, histories, segments, responses, decode=False):
@@ -67,11 +66,9 @@ class MULTI(nn.Module):
         super(MULTI, self).__init__()
 
         self.config = config
-        # TODO revert to HRED encoder
 
         #self.encoder = GRUEncoder(config.vocab_size, config.encoder_hidden_size)
 
-        # TODO restore GRU encoder
         # self.encoder = Encoder(
         #     n_src_vocab=config.vocab_size, len_max_seq=300,
         #     d_word_vec=config.embedding_size, n_layers=6, n_head=8, d_k=64, d_v=64, d_model=config.encoder_hidden_size,
@@ -98,12 +95,12 @@ class MULTI(nn.Module):
 
         #self.tgt_word_prj = nn.Linear(config.decoder_hidden_size, config.vocab_size, bias=False)
 
+        # TODO target weight sharing is disabled!
         self.model = MultiModel(config.vocab_size, config.vocab_size, config.max_history, config.embedding_size, config.decoder_hidden_size,
-                              config.decoder_hidden_size * 4, tgt_emb_prj_weight_sharing=False, encoder=config.encoder_type,
+                              config.decoder_hidden_size * 4, encoder=config.encoder_type,
                               decoder=config.decoder_type, n_layers=config.num_layers)
 
         # if config.tie_embedding:
-        #     # TODO undo embedding name differences
         #     #self.decoder.embedding.weight = self.encoder.src_word_emb.weight
         #     #self.decoder.out.weight = self.decoder.embedding.weight
         #

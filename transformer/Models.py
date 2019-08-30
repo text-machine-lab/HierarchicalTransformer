@@ -152,8 +152,8 @@ class UNetEncoder(nn.Module):
 
         assert n_layers % 2 == 0  # we have equal up layers as down layers
 
-        self.in_layer = UNetEncoderLayer(d_model, d_inner, n_head, d_k, d_v, dropout=dropout, type='same')
-        self.out_layer = UNetEncoderLayer(d_model, d_inner, n_head, d_k, d_v, dropout=dropout, type='same')
+        self.in_layer = UNetEncoderLayer(d_model, d_inner, n_head, d_k, d_v, dropout=dropout, type='same', skip_connect=True)
+        self.out_layer = UNetEncoderLayer(d_model, d_inner, n_head, d_k, d_v, dropout=dropout, type='same', skip_connect=True)
 
         depth = n_layers // 2 - 1
 
@@ -202,8 +202,7 @@ class UNetEncoder(nn.Module):
         enc_output, enc_slf_attn = self.in_layer(
             enc_output,
             non_pad_mask=non_pad_mask,
-            slf_attn_mask=slf_attn_mask
-        )
+            slf_attn_mask=slf_attn_mask)
 
         first_output = enc_output
 
@@ -273,10 +272,10 @@ class UNetEncoder(nn.Module):
 
         ######## OUTPUT LAYER #############
 
-        enc_output, enc_slf_attn = self.in_layer(
+        enc_output, enc_slf_attn = self.out_layer(
             enc_output + first_output,  # HERE WE ADD FIRST DOWN LAYER OUTPUT FOR FINAL PREDICTION
             non_pad_mask=non_pad_mask,
-            slf_attn_mask=slf_attn_mask,)
+            slf_attn_mask=slf_attn_mask)
 
         if return_attns:
             slf_attn_list.append(enc_slf_attn)

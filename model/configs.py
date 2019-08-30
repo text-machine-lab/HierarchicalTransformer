@@ -115,7 +115,7 @@ def get_config(parse=True, **optional_kwargs):
     # Currently does not support lstm
     parser.add_argument('--rnn', type=str, default='gru')
     parser.add_argument('--rnncell', type=str, default='gru')
-    parser.add_argument('--num_layers', type=int, default=1)
+    parser.add_argument('--num_layers', type=int, default=6)
     parser.add_argument('--embedding_size', type=int, default=500)
     parser.add_argument('--tie_embedding', type=str2bool, default=True)
     parser.add_argument('--encoder_hidden_size', type=int, default=1000)
