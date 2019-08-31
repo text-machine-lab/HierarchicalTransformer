@@ -250,8 +250,8 @@ class Solver(object):
     def train(self):
         epoch_loss_history = []
 
-        print('Test before training')
-        self.test()
+        #print('Test before training')
+        #self.test()
 
         #print('\n<Validation before training>...')
         #self.validation_loss = self.evaluate()
@@ -261,7 +261,6 @@ class Solver(object):
         min_validation_loss = float('inf')
         min_val_loss_epoch = -1
 
-        print('Training start')
         for epoch_i in range(self.epoch_i, self.config.n_epoch):
             self.epoch_i = epoch_i
             batch_loss_history = []
@@ -357,6 +356,9 @@ class Solver(object):
             if min_validation_loss == self.validation_loss:
                 print('Lowest validation loss yet. Saving')
                 self.save_model(epoch_i + 1)
+            else:
+                print('Validation loss increased. Stopping training')
+                break
 
             #if epoch_i % self.config.plot_every_epoch == 0:
                     #self.write_summary(epoch_i)
@@ -424,6 +426,8 @@ class Solver(object):
         # [batch_size, max_seq_len, vocab_size]
         generated_sentences = self.model(input_histories, history_segments, target_sentences, decode=True)
 
+        generated_sentences = [sentence for sentence in generated_sentences]
+
         # write output to file
         with open(file, 'a') as f:
             f.write(f'<Epoch {self.epoch_i}>\n\n')
@@ -432,7 +436,8 @@ class Solver(object):
             for input_sent, target_sent, output_sent in zip(input_histories, target_sentences, generated_sentences):
                 input_sent = self.vocab.decode(input_sent, stop_at_eos=False)
                 target_sent = self.vocab.decode(target_sent)
-                output_sent = '\n'.join([self.vocab.decode(sent) for sent in output_sent])
+                output_sent = self.vocab.decode(output_sent)
+                #output_sent = '\n'.join([self.vocab.decode(sent) for sent in output_sent])
                 s = '\n'.join(['Input sentence: ' + input_sent,
                                'Ground truth: ' + target_sent,
                                'Generated response: ' + output_sent + '\n'])

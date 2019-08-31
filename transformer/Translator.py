@@ -6,6 +6,7 @@ import torch.nn.functional as F
 
 from transformer.Models import Transformer
 from transformer.Beam import Beam
+import transformer.Constants as Constants
 
 class Translator(object):
     ''' Load with trained model and handle the beam search '''
@@ -57,6 +58,48 @@ class Translator(object):
         model = model.to(self.device)
 
         self.model = model
+
+    def sample_topk_batch(self, src_seq, src_pos, src_segs=None, k=10):
+
+        def predict_word(dec_seq, dec_pos, src_seq, enc_output):
+            dec_output, *_ = self.model.decoder(dec_seq, dec_pos, src_seq, enc_output)
+            dec_output = dec_output[:, -1, :]  # Pick the last step: (bh * bm) * d_h
+            word_prob = F.softmax(self.model.tgt_word_prj(dec_output), dim=1)
+
+            return word_prob
+
+        with torch.no_grad():
+            #-- Encode
+            src_seq, src_pos = src_seq.to(self.device), src_pos.to(self.device)
+
+            if src_segs is not None:
+                src_segs.to(self.device)
+
+            src_enc, *_ = self.model.encoder(src_seq, src_pos, src_segs=src_segs)
+
+            batch_size = src_seq.shape[0]
+
+            dec_seq= torch.LongTensor([Constants.BOS] * batch_size).view(batch_size, 1).to(src_seq.device)
+            dec_pos = torch.LongTensor([[i for i in range(self.max_seq_len)] for _ in range(batch_size)]).to(src_seq.device)
+
+            for i in range(self.max_seq_len):
+                # assume word_prob shape [batch_size, vocab_size]
+                word_prob = predict_word(dec_seq, dec_pos[:, :i+1], src_seq, src_enc)
+
+                if k is None:
+                    k = word_prob.shape[-1]
+                # [batch_size, k]
+                topk, _ = torch.topk(word_prob, k, dim=1)
+                # [batch_size,]
+                kth_value = topk[:, -1].unsqueeze(1)
+                word_topk = word_prob * (word_prob >= kth_value).float()
+                # normalize
+                word_prob_topk = word_topk / word_topk.norm(dim=1).unsqueeze(1)
+                next_word = word_prob_topk.multinomial(1)
+                dec_seq = torch.cat([dec_seq, next_word], 1)
+
+            # remove go token before returning sampled sequence
+        return dec_seq[:, 1:]
 
     def translate_batch(self, src_seq, src_pos, src_segs=None):
         ''' Translation work in one batch '''

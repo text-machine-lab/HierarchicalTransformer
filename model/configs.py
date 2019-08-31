@@ -57,12 +57,14 @@ class Config(object):
         # Save path
         if self.mode == 'train' and self.checkpoint is None:
             time_now = datetime.now().strftime('%Y-%m-%d_%H:%M:%S')
-            self.save_path = save_dir.joinpath(self.data, self.model, time_now)
+            if self.save_path is None:
+                self.save_path = save_dir.joinpath(self.data, self.model, time_now)
             self.logdir = self.save_path
             os.makedirs(self.save_path, exist_ok=True)
         elif self.checkpoint is not None:
             assert os.path.exists(self.checkpoint)
-            self.save_path = os.path.dirname(self.checkpoint)
+            if self.save_path is None:
+                self.save_path = os.path.dirname(self.checkpoint)
             self.logdir = self.save_path
 
     def __str__(self):
@@ -96,6 +98,7 @@ def get_config(parse=True, **optional_kwargs):
     parser.add_argument('--encoder_type', type=str, default='transformer')
     parser.add_argument('--decoder_type', type=str, default='transformer')
     parser.add_argument('--max_samples', type=int, default=None)
+    parser.add_argument('--save_path', type=str, default=None)
 
     # Generation
     parser.add_argument('--max_unroll', type=int, default=30)

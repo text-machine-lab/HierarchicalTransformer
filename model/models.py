@@ -132,7 +132,7 @@ class MULTI(nn.Module):
         if not decode:
             return logits
         else:
-            batch_hyp, batch_logits = self.translator.translate_batch(histories, history_pos, src_segs=segments)
+            batch_hyp = self.translator.sample_topk_batch(histories, history_pos, src_segs=segments)
             return batch_hyp
         # history_length = (histories != 0).sum(1) - 1
         #
