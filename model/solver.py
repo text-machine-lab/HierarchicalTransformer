@@ -250,7 +250,10 @@ class Solver(object):
     def train(self):
         epoch_loss_history = []
 
-        print('\n<Validation before training>...')
+        print('Test before training')
+        self.test()
+
+        #print('\n<Validation before training>...')
         #self.validation_loss = self.evaluate()
 
         #word_perplexity = self.test()
@@ -310,7 +313,8 @@ class Solver(object):
                 # Back-propagation
                 batch_loss.backward()
 
-                wandb.log({'word_grad': self.model.model.encoder.src_word_emb.weight.grad.abs().mean()})
+                if isinstance(self.model, MULTI):
+                    wandb.log({'word_grad': self.model.model.encoder.src_word_emb.weight.grad.abs().mean()})
 
                 # Gradient cliping
                 norm = torch.nn.utils.clip_grad_norm_(self.model.parameters(), self.config.clip)
@@ -376,8 +380,13 @@ class Solver(object):
         return epoch_loss_history
 
     def generate_sentence(self, input_sentences, input_sentence_length,
-                          input_conversation_length, target_sentences):
+                          input_conversation_length, target_sentences, file=None, verbose=True):
+
         self.model.eval()
+
+        # save to a text file
+        if file is None:
+            file = os.path.join(self.config.save_path, 'samples.txt')
 
         # [batch_size, max_seq_len, vocab_size]
         generated_sentences = self.model(
@@ -388,10 +397,10 @@ class Solver(object):
             decode=True)
 
         # write output to file
-        with open(os.path.join(self.config.save_path, 'samples.txt'), 'a') as f:
+        with open(file, 'a') as f:
             f.write(f'<Epoch {self.epoch_i}>\n\n')
 
-            tqdm.write('\n<Samples>')
+            if verbose: tqdm.write('\n<Samples>')
             for input_sent, target_sent, output_sent in zip(input_sentences, target_sentences, generated_sentences):
                 input_sent = self.vocab.decode(input_sent)
                 target_sent = self.vocab.decode(target_sent)
@@ -400,22 +409,26 @@ class Solver(object):
                                'Ground truth: ' + target_sent,
                                'Generated response: ' + output_sent + '\n'])
                 f.write(s + '\n')
-                print(s)
-            print('')
+                if verbose: print(s)
+            if verbose: print('')
 
-    def generate_transformer_sentence(self, input_histories, history_segments, target_sentences):
+
+    def generate_transformer_sentence(self, input_histories, history_segments, target_sentences, file=None, verbose=True):
         self.model.eval()
 
         #gold = self.add_sos(target_sentences)
+
+        if file is None:
+            file = os.path.join(self.config.save_path, 'samples.txt')
 
         # [batch_size, max_seq_len, vocab_size]
         generated_sentences = self.model(input_histories, history_segments, target_sentences, decode=True)
 
         # write output to file
-        with open(os.path.join(self.config.save_path, 'samples.txt'), 'a') as f:
+        with open(file, 'a') as f:
             f.write(f'<Epoch {self.epoch_i}>\n\n')
 
-            tqdm.write('\n<Samples>')
+            if verbose: tqdm.write('\n<Samples>')
             for input_sent, target_sent, output_sent in zip(input_histories, target_sentences, generated_sentences):
                 input_sent = self.vocab.decode(input_sent, stop_at_eos=False)
                 target_sent = self.vocab.decode(target_sent)
@@ -424,8 +437,9 @@ class Solver(object):
                                'Ground truth: ' + target_sent,
                                'Generated response: ' + output_sent + '\n'])
                 f.write(s + '\n')
-                print(s)
-            print('')
+
+                if verbose: print(s)
+            if verbose: print('')
 
 
     def evaluate(self):
@@ -466,9 +480,11 @@ class Solver(object):
 
                     #batch_loss, n_words = masked_cross_entropy(sentence_logits, target_sentences, sentence_lens)
 
-                # TODO allow generation from HRED
-                #if batch_i == 0:
-                #    self.generate_transformer_sentence(input_histories, history_segments, target_sentences)
+                if batch_i == 0:
+                    if isinstance(self.model, MULTI):
+                        self.generate_transformer_sentence(input_histories, history_segments, target_sentences)
+                    else:
+                        self.generate_sentence(input_sentences, input_sentence_length, input_conversation_length, target_sentences)
 
 
                 batch_loss, n_words = masked_cross_entropy(
@@ -494,6 +510,10 @@ class Solver(object):
         self.model.eval()
         batch_loss_history = []
         n_total_words = 0
+
+        if self.config.full_samples_file is not None:
+            open(self.config.full_samples_file, 'w').close()  # clear all contents of file
+
         for batch_i, (conversations, conversation_length, sentence_length) in enumerate(tqdm(self.test_data_loader, ncols=80)):
             # conversations: (batch_size) list of conversations
             #   conversation: list of sentences
@@ -526,6 +546,18 @@ class Solver(object):
                 else:
                     sentence_logits = self.model(input_sentences, input_sentence_length, input_conversation_length,
                                                  target_sentences, decode=False)
+
+
+                if self.config.full_samples_file is not None:
+
+                    if self.config.max_samples is None or self.config.max_samples >= batch_i * self.config.batch_size:
+
+                        if isinstance(self.model, MULTI):
+                            self.generate_transformer_sentence(input_histories, history_segments, target_sentences,
+                                                               file=self.config.full_samples_file, verbose=False)
+                        else:
+                            self.generate_sentence(input_sentences, input_sentence_length, input_conversation_length, target_sentences,
+                                                   file=self.config.full_samples_file, verbose=False)
 
                     #batch_loss, n_words = masked_cross_entropy(sentence_logits, target_sentences, sentence_lens)
 

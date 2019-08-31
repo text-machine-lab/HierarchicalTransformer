@@ -100,6 +100,9 @@ class MULTI(nn.Module):
                               config.decoder_hidden_size * 4, encoder=config.encoder_type,
                               decoder=config.decoder_type, n_layers=config.num_layers)
 
+        self.translator = Translator(model=self.model, beam_size=config.beam_size,
+                                     max_seq_len=config.gen_response_len)
+
         # if config.tie_embedding:
         #     #self.decoder.embedding.weight = self.encoder.src_word_emb.weight
         #     #self.decoder.out.weight = self.decoder.embedding.weight
@@ -227,7 +230,7 @@ class HRED(nn.Module):
                                          config.embedding_size,
                                          config.encoder_hidden_size,
                                          config.rnn,
-                                         config.num_layers,
+                                         1,
                                          config.bidirectional,
                                          config.dropout)
 
@@ -237,14 +240,14 @@ class HRED(nn.Module):
         self.context_encoder = layers.ContextRNN(context_input_size,
                                                  config.context_size,
                                                  config.rnn,
-                                                 config.num_layers,
+                                                 1,
                                                  config.dropout)
 
         self.decoder = layers.DecoderRNN(config.vocab_size,
                                          config.embedding_size,
                                          config.decoder_hidden_size,
                                          config.rnncell,
-                                         config.num_layers,
+                                         1,
                                          config.dropout,
                                          config.word_drop,
                                          config.max_unroll,
@@ -253,7 +256,7 @@ class HRED(nn.Module):
                                          config.beam_size)
 
         self.context2decoder = layers.FeedForward(config.context_size,
-                                                  config.num_layers * config.decoder_hidden_size,
+                                                  config.decoder_hidden_size,
                                                   num_layers=1,
                                                   activation=config.activation)
 
@@ -304,7 +307,7 @@ class HRED(nn.Module):
         decoder_init = self.context2decoder(context_outputs)
 
         # [num_layers, batch_size, hidden_size]
-        decoder_init = decoder_init.view(self.decoder.num_layers, -1, self.decoder.hidden_size)
+        decoder_init = decoder_init.view(1, -1, self.decoder.hidden_size)
 
         # train: [batch_size, seq_len, vocab_size]
         # eval: [batch_size, seq_len]

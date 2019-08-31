@@ -95,6 +95,7 @@ def get_config(parse=True, **optional_kwargs):
     parser.add_argument('--tg_enable', action='store_true', default=False)
     parser.add_argument('--encoder_type', type=str, default='transformer')
     parser.add_argument('--decoder_type', type=str, default='transformer')
+    parser.add_argument('--max_samples', type=int, default=None)
 
     # Generation
     parser.add_argument('--max_unroll', type=int, default=30)
@@ -108,6 +109,7 @@ def get_config(parse=True, **optional_kwargs):
     parser.add_argument('--beam_size', type=int, default=1)
     parser.add_argument('--max_history', type=int, default=250)
     parser.add_argument('--msg', type=str, default='')
+    parser.add_argument('--full_samples_file', type=str, default=None)  # generate samples on test set and save them
 
     # Model
     parser.add_argument('--model', type=str, default='VHCR',
