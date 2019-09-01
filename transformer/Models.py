@@ -52,7 +52,7 @@ def get_attn_key_pad_mask(seq_k, seq_q):
     # Expand to fit the shape of key query attention matrix.
     len_q = seq_q.size(1)
     padding_mask = seq_k.eq(Constants.PAD)
-    padding_mask = padding_mask.unsqueeze(1).expand(-1, len_q, -1)  # b x lq x lk
+    padding_mask = padding_mask.unsqueeze(1).expand(-1, len_q, -1).bool()  # b x lq x lk
 
     return padding_mask
 
@@ -317,7 +317,7 @@ class Decoder(nn.Module):
 
         slf_attn_mask_subseq = get_subsequent_mask(tgt_seq)
         slf_attn_mask_keypad = get_attn_key_pad_mask(seq_k=tgt_seq, seq_q=tgt_seq)
-        slf_attn_mask = (slf_attn_mask_keypad + slf_attn_mask_subseq).gt(0)
+        slf_attn_mask = (slf_attn_mask_keypad.bool() + slf_attn_mask_subseq.bool()).gt(0)
 
         dec_enc_attn_mask = get_attn_key_pad_mask(seq_k=src_seq, seq_q=tgt_seq)
 

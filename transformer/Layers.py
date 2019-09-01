@@ -54,10 +54,6 @@ class UNetEncoderLayer(nn.Module):
         else:
             raise RuntimeError('Did not specify appropriate convolution type')
 
-        # TODO determine if this helps
-        nn.init.xavier_normal_(self.conv.weight, gain=1/100)
-        nn.init.zeros_(self.conv.bias)
-
     def forward(self, enc_input, non_pad_mask=None, slf_attn_mask=None):
 
         conv_input = enc_input.transpose(1, 2)  # (batch_size, emb_size, n_steps)

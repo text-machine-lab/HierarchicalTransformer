@@ -59,7 +59,7 @@ class Translator(object):
 
         self.model = model
 
-    def sample_topk_batch(self, src_seq, src_pos, src_segs=None, k=10):
+    def sample_topk_batch(self, src_seq, src_pos, src_segs=None, k=20):
 
         def predict_word(dec_seq, dec_pos, src_seq, enc_output):
             dec_output, *_ = self.model.decoder(dec_seq, dec_pos, src_seq, enc_output)
