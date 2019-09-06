@@ -42,6 +42,43 @@ def get_gpu_memory_used():
     return alloc_mem
 
 
+def extract_history_response(conversations):
+    input_histories_ls = [conv[:i] for conv in conversations for i in range(1, len(conv))]
+    target_sentences = [conv[i] for conv in conversations for i in range(1, len(conv))]
+    input_sentences = [conv[i-1] for conv in conversations for i in range(1, len(conv))]
+
+    input_conversation_length = [len(conversations[i]) - 1 for i in range(len(conversations))]
+
+    input_histories_joined = [[token for sentence in history for token in sentence if token != 0]
+                              for history in input_histories_ls]
+    max_history_len = max([len(history) for history in input_histories_joined])
+    input_histories_padded = [history + [0] * (max_history_len - len(history))
+                              for history in input_histories_joined]
+
+    input_history_segs = [[i+1 for i in range(len(history)) for token in history[i] if token != 0]
+                              for history in input_histories_ls]
+    input_history_segs_padded = [history + [0] * (max_history_len - len(history))
+                              for history in input_history_segs]
+
+    # we shuffle in case examples are removed from the end to fit memory requirements
+    pairs = list(zip(input_histories_padded, input_history_segs_padded, target_sentences, input_sentences))
+    #random.shuffle(pairs)
+    # input_histories_shuf = [pair[0] for pair in pairs]
+    # input_history_segs_shuf = [pair[1] for pair in pairs]
+    # target_sentences_shuf = [pair[2] for pair in pairs]
+    # input_sentences_shuf = [pair[3] for pair in pairs]
+    # input_conversation_length_shuf = [pair[4] for pair in pairs]
+    input_histories_shuf, input_history_segs_shuf, target_sentences_shuf, input_sentences_shuf = zip(*pairs)
+
+    input_histories = to_var(torch.LongTensor(input_histories_shuf))
+    target_sentences = to_var(torch.LongTensor(target_sentences_shuf))
+    input_sentences = to_var(torch.LongTensor(input_sentences_shuf))
+    history_segments = to_var(torch.LongTensor(input_history_segs_shuf))
+    conv_lens = to_var(torch.LongTensor(input_conversation_length))
+
+    return input_histories, history_segments, target_sentences, input_sentences, conv_lens
+
+
 class MyDataParallel(torch.nn.DataParallel):
     """
     Allow nn.DataParallel to call model's attributes.
@@ -87,6 +124,10 @@ class Solver(object):
                         print('\t' + name)
                         dim = int(param.size(0) / 3)
                         param.data[dim:2 * dim].fill_(2.0)
+
+        if self.config.restore:
+            print('Restoring model from save path')
+            self.load_model(self.config.save_path)
 
         if not self.config.tg_enable:
             alert.disable = True
@@ -137,6 +178,17 @@ class Solver(object):
 
     def load_model(self, checkpoint):
         """Load parameters from checkpoint"""
+
+        def fileEpoch(file):
+            return int(re.sub('[^0-9]','', file))
+
+        if os.path.isdir(checkpoint):
+            files = os.listdir(checkpoint)
+            files = [file for file in files if '.pkl' in file]
+            files.sort(key=fileEpoch)
+            print('Save path is dir. Using largest epoch save: %s' % checkpoint)
+            checkpoint = os.path.join(checkpoint, files[-1])
+
         print(f'Load parameters from {checkpoint}')
         epoch = re.match(r"[0-9]*", os.path.basename(checkpoint)).group(0)
         self.epoch_i = int(epoch)
@@ -210,42 +262,6 @@ class Solver(object):
     #
     #     return histories, responses
 
-    def extract_history_response(self, conversations):
-        input_histories_ls = [conv[:i] for conv in conversations for i in range(1, len(conv))]
-        target_sentences = [conv[i] for conv in conversations for i in range(1, len(conv))]
-        input_sentences = [conv[i-1] for conv in conversations for i in range(1, len(conv))]
-
-        input_conversation_length = [len(conversations[i]) - 1 for i in range(len(conversations))]
-
-        input_histories_joined = [[token for sentence in history for token in sentence if token != 0]
-                                  for history in input_histories_ls]
-        max_history_len = max([len(history) for history in input_histories_joined])
-        input_histories_padded = [history + [0] * (max_history_len - len(history))
-                                  for history in input_histories_joined]
-
-        input_history_segs = [[i+1 for i in range(len(history)) for token in history[i] if token != 0]
-                                  for history in input_histories_ls]
-        input_history_segs_padded = [history + [0] * (max_history_len - len(history))
-                                  for history in input_history_segs]
-
-        # we shuffle in case examples are removed from the end to fit memory requirements
-        pairs = list(zip(input_histories_padded, input_history_segs_padded, target_sentences, input_sentences))
-        #random.shuffle(pairs)
-        # input_histories_shuf = [pair[0] for pair in pairs]
-        # input_history_segs_shuf = [pair[1] for pair in pairs]
-        # target_sentences_shuf = [pair[2] for pair in pairs]
-        # input_sentences_shuf = [pair[3] for pair in pairs]
-        # input_conversation_length_shuf = [pair[4] for pair in pairs]
-        input_histories_shuf, input_history_segs_shuf, target_sentences_shuf, input_sentences_shuf = zip(*pairs)
-
-        input_histories = to_var(torch.LongTensor(input_histories_shuf))
-        target_sentences = to_var(torch.LongTensor(target_sentences_shuf))
-        input_sentences = to_var(torch.LongTensor(input_sentences_shuf))
-        history_segments = to_var(torch.LongTensor(input_history_segs_shuf))
-        conv_lens = to_var(torch.LongTensor(input_conversation_length))
-
-        return input_histories, history_segments, target_sentences, input_sentences, conv_lens
-
     @time_desc_decorator('Training Start!')
     def train(self):
         epoch_loss_history = []
@@ -278,7 +294,10 @@ class Solver(object):
 
                 with torch.no_grad():
                     input_histories, history_segments, target_sentences, input_sentences, input_conversation_length \
-                        = self.extract_history_response(conversations)
+                        = extract_history_response(conversations)
+
+                    target_sentence_length = (target_sentences != 0).long().sum(1)
+                    input_sentence_length = (input_sentences != 0).long().sum(1)
 
                     # MAKE SURE THAT EVALUATION FUNCTION MATCHES THESE RESTRICTIONS ON INPUT SIZE!!!
 
@@ -288,9 +307,6 @@ class Solver(object):
 
                     input_histories = input_histories[:, :self.config.max_history]
                     history_segments = history_segments[:, :self.config.max_history]
-
-                    target_sentence_length = (target_sentences != 0).long().sum(1)
-                    input_sentence_length = (input_sentences != 0).long().sum(1)
 
                 self.model.train()
                 self.optimizer.zero_grad()
@@ -365,9 +381,10 @@ class Solver(object):
 
         #self.save_model(self.config.n_epoch)
 
-        print('Loading model from lowest validation epoch')
-        ckpt_path = os.path.join(self.config.save_path, f'{min_val_loss_epoch + 1}.pkl')
-        self.load_model(ckpt_path)
+        if self.config.n_epoch > 0:
+            print('Loading model from lowest validation epoch')
+            ckpt_path = os.path.join(self.config.save_path, f'{min_val_loss_epoch + 1}.pkl')
+            self.load_model(ckpt_path)
 
         wandb.config.update({'min_val_loss': min_validation_loss})
 
@@ -381,7 +398,7 @@ class Solver(object):
 
         return epoch_loss_history
 
-    def generate_sentence(self, input_sentences, input_sentence_length,
+    def generate_sentence(self, input_sentences, input_histories, input_sentence_length,
                           input_conversation_length, target_sentences, file=None, verbose=True):
 
         self.model.eval()
@@ -403,8 +420,8 @@ class Solver(object):
             f.write(f'<Epoch {self.epoch_i}>\n\n')
 
             if verbose: tqdm.write('\n<Samples>')
-            for input_sent, target_sent, output_sent in zip(input_sentences, target_sentences, generated_sentences):
-                input_sent = self.vocab.decode(input_sent)
+            for input_sent, target_sent, output_sent in zip(input_histories, target_sentences, generated_sentences):
+                input_sent = self.vocab.decode(input_sent, stop_at_eos=False)
                 target_sent = self.vocab.decode(target_sent)
                 output_sent = '\n'.join([self.vocab.decode(sent) for sent in output_sent])
                 s = '\n'.join(['Input sentence: ' + input_sent,
@@ -463,7 +480,7 @@ class Solver(object):
             with torch.no_grad():
 
                 input_histories, history_segments, target_sentences, input_sentences, input_conversation_length \
-                    = self.extract_history_response(conversations)
+                    = extract_history_response(conversations)
 
                 target_sentence_length = (target_sentences != 0).long().sum(1)
                 input_sentence_length = (input_sentences != 0).long().sum(1)
@@ -489,7 +506,7 @@ class Solver(object):
                     if isinstance(self.model, MULTI):
                         self.generate_transformer_sentence(input_histories, history_segments, target_sentences)
                     else:
-                        self.generate_sentence(input_sentences, input_sentence_length, input_conversation_length, target_sentences)
+                        self.generate_sentence(input_sentences, input_histories, input_sentence_length, input_conversation_length, target_sentences)
 
 
                 batch_loss, n_words = masked_cross_entropy(
@@ -529,7 +546,7 @@ class Solver(object):
             with torch.no_grad():
 
                 input_histories, history_segments, target_sentences, input_sentences, input_conversation_length \
-                    = self.extract_history_response(conversations)
+                    = extract_history_response(conversations)
 
                 target_sentence_length = (target_sentences != 0).long().sum(1)
                 input_sentence_length = (input_sentences != 0).long().sum(1)
@@ -561,7 +578,7 @@ class Solver(object):
                             self.generate_transformer_sentence(input_histories, history_segments, target_sentences,
                                                                file=self.config.full_samples_file, verbose=False)
                         else:
-                            self.generate_sentence(input_sentences, input_sentence_length, input_conversation_length, target_sentences,
+                            self.generate_sentence(input_sentences, input_histories, input_sentence_length, input_conversation_length, target_sentences,
                                                    file=self.config.full_samples_file, verbose=False)
 
                     #batch_loss, n_words = masked_cross_entropy(sentence_logits, target_sentences, sentence_lens)
@@ -686,6 +703,8 @@ class VariationalSolver(Solver):
         epoch_loss_history = []
         kl_mult = 0.0
         conv_kl_mult = 0.0
+        min_val_loss = float('inf')
+        min_val_loss_epoch = 0
         for epoch_i in range(self.epoch_i, self.config.n_epoch):
             self.epoch_i = epoch_i
             batch_loss_history = []
@@ -721,6 +740,9 @@ class VariationalSolver(Solver):
                 input_conversation_length = to_var(torch.LongTensor(input_conversation_length))
                 target_sentences = to_var(torch.LongTensor(target_sentences))
                 target_sentence_length = to_var(torch.LongTensor(target_sentence_length))
+                #
+                # target_sentence_length = (target_sentences != 0).long().sum(1)
+                # input_sentence_length = (input_sentences != 0).long().sum(1)
 
                 # reset gradient
                 self.optimizer.zero_grad()
@@ -735,6 +757,10 @@ class VariationalSolver(Solver):
                     sentence_logits,
                     target_sentences,
                     target_sentence_length)
+
+                per_word_loss = recon_loss / n_words
+
+                wandb.log({'train_loss': per_word_loss})
 
                 batch_loss = recon_loss + kl_mult * kl_div
                 batch_loss_history.append(batch_loss.item())
@@ -782,24 +808,42 @@ class VariationalSolver(Solver):
                 print_str += f', bow_loss = {self.epoch_bow_loss:.3f}'
             print(print_str)
 
-            if epoch_i % self.config.save_every_epoch == 0:
-                self.save_model(epoch_i + 1)
-
             print('\n<Validation>...')
             self.validation_loss = self.evaluate()
+            if self.validation_loss <= min_val_loss:
+                min_val_loss = self.validation_loss
+                min_val_loss_epoch = epoch_i
+                self.save_model(epoch_i + 1)
+            else:
+                print('Validation loss increased. Stop training')
+                break
 
-            if epoch_i % self.config.plot_every_epoch == 0:
-                    self.write_summary(epoch_i)
+            #if epoch_i % self.config.plot_every_epoch == 0:
+                    #self.write_summary(epoch_i)
+
+        if self.config.n_epoch > 0:
+            print('Loading model from lowest validation epoch')
+            ckpt_path = os.path.join(self.config.save_path, f'{min_val_loss_epoch + 1}.pkl')
+            self.load_model(ckpt_path)
+
+
+        print('Evaluating test perplexity')
+        word_perplexity = self.importance_sample(eval=False)
+
+        wandb.config.update({'min_val_loss': min_val_loss})
+
+        wandb.config.update({'test perplexity': word_perplexity})
 
         return epoch_loss_history
 
-    def generate_sentence(self, sentences, sentence_length,
-                          input_conversation_length, input_sentences, target_sentences):
+    def generate_sentence(self, sentences, input_histories, sentence_length,
+                          input_conversation_length, input_sentences, target_sentences, file=None, verbose=True):
         """Generate output of decoder (single batch)"""
 
-        #TODO do not modify this!!
-
         self.model.eval()
+
+        if file is None:
+            file = os.path.join(self.config.save_path, 'samples.txt')
 
         # [batch_size, max_seq_len, vocab_size]
         generated_sentences, _, _, _ = self.model(
@@ -810,20 +854,20 @@ class VariationalSolver(Solver):
             decode=True)
 
         # write output to file
-        with open(os.path.join(self.config.save_path, 'samples.txt'), 'a') as f:
+        with open(file, 'a') as f:
             f.write(f'<Epoch {self.epoch_i}>\n\n')
 
-            tqdm.write('\n<Samples>')
-            for input_sent, target_sent, output_sent in zip(input_sentences, target_sentences, generated_sentences):
-                input_sent = self.vocab.decode(input_sent)
+            if verbose: tqdm.write('\n<Samples>')
+            for input_sent, target_sent, output_sent in zip(input_histories, target_sentences, generated_sentences):
+                input_sent = self.vocab.decode(input_sent, stop_at_eos=False)
                 target_sent = self.vocab.decode(target_sent)
                 output_sent = '\n'.join([self.vocab.decode(sent) for sent in output_sent])
                 s = '\n'.join(['Input sentence: ' + input_sent,
                                'Ground truth: ' + target_sent,
                                'Generated response: ' + output_sent + '\n'])
                 f.write(s + '\n')
-                print(s)
-            print('')
+                if verbose: print(s)
+            if verbose: print('')
 
     def evaluate(self):
         self.model.eval()
@@ -860,11 +904,14 @@ class VariationalSolver(Solver):
                 target_sentence_length = to_var(torch.LongTensor(target_sentence_length))
 
             if batch_i == 0:
+                input_histories, history_segments, _, _, _ \
+                    = extract_history_response(conversations)
                 input_conversations = [conv[:-1] for conv in conversations]
                 input_sentences = [sent for conv in input_conversations for sent in conv]
                 with torch.no_grad():
                     input_sentences = to_var(torch.LongTensor(input_sentences))
                 self.generate_sentence(sentences,
+                                       input_histories,
                                        sentence_length,
                                        input_conversation_length,
                                        input_sentences,
@@ -905,15 +952,20 @@ class VariationalSolver(Solver):
 
         return epoch_loss
 
-    def importance_sample(self):
+    def importance_sample(self, eval=True):
         ''' Perform importance sampling to get tighter bound
         '''
+
+        open(self.config.full_samples_file, 'w').close()  # clear samples file
+
+        loader = self.eval_data_loader if eval else self.test_data_loader
+
         self.model.eval()
         weight_history = []
         n_total_words = 0
         kl_div_history = []
         for batch_i, (conversations, conversation_length, sentence_length) \
-                in enumerate(tqdm(self.eval_data_loader, ncols=80)):
+                in enumerate(tqdm(loader, ncols=80)):
             # conversations: (batch_size) list of conversations
             #   conversation: list of sentences
             #   sentence: list of tokens
@@ -938,6 +990,16 @@ class VariationalSolver(Solver):
                 target_sentences = to_var(torch.LongTensor(target_sentences))
                 target_sentence_length = to_var(torch.LongTensor(target_sentence_length))
 
+                # TODO figure out if this prints to file
+                if self.config.full_samples_file is not None:
+                    input_histories, history_segments, _, _, _ \
+                        = extract_history_response(conversations)
+                    if self.config.max_samples is None or self.config.max_samples >= batch_i * self.config.batch_size:
+                        input_conversations = [conv[:-1] for conv in conversations]
+                        input_sentences = [sent for conv in input_conversations for sent in conv]
+                        self.generate_sentence(sentences, input_histories, sentence_length, input_conversation_length,
+                                               input_sentences, target_sentences, file=self.config.full_samples_file, verbose=False)
+
             # treat whole batch as one data sample
             weights = []
             for j in range(self.config.importance_sample):
@@ -960,8 +1022,8 @@ class VariationalSolver(Solver):
 
             # weights: [n_samples]
             weights = torch.stack(weights, 0)
-            m = np.floor(weights.max())
-            weights = np.log(torch.exp(weights - m).sum())
+            m = np.floor(weights.max().item())
+            weights = np.log(torch.exp(weights - m).sum().item())
             weights = m + weights - np.log(self.config.importance_sample)
             weight_history.append(weights)
 

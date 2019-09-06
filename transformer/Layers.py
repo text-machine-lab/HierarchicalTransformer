@@ -33,8 +33,9 @@ class UNetEncoderLayer(nn.Module):
 
         d_in = d_in if d_in is not None else d_out  # size of input to unet layer
 
+        # TODO input and output sizes of attention are the same now
         self.slf_attn = MultiHeadAttention(
-            n_head, d_out, d_k, d_v, dropout=dropout, d_in=d_in)
+            n_head, d_out, d_k, d_v, dropout=dropout)
         self.pos_ffn = PositionwiseFeedForward(d_out, d_inner, dropout=dropout)
 
         self.norm = nn.LayerNorm(d_out)
@@ -77,8 +78,9 @@ class UNetEncoderLayer(nn.Module):
         norm_output = self.norm(norm_input)
 
         # here the output of the convolution performs attention over the input
+        #TODO see if using norm output helps
         enc_output, enc_slf_attn = self.slf_attn(
-            norm_output, enc_input, enc_input, mask=slf_attn_mask)
+            norm_output, norm_output, norm_output, mask=slf_attn_mask)
 
         enc_output *= non_pad_mask
         enc_output = self.pos_ffn(enc_output)

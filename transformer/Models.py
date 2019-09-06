@@ -158,14 +158,16 @@ class UNetEncoder(nn.Module):
         depth = n_layers // 2 - 1
 
         # each layer increases in size by the sqrt of 2 to keep computation relatively constant
-        multiples = [sqrt(2) ** i for i in range(depth + 1)]
+        multiples = [sqrt(2)** i for i in range(depth + 1)]
         layer_sizes = [round(d_model * multiples[i]) for i in range(depth + 1)]  # [d_model for _ in range(depth+1)]  #
+        inner_sizes = [round(d_inner * multiples[i]) for i in range(depth + 1)]
         d_k_sizes = [round(d_k * multiples[i+1]) for i in range(depth)]
         d_v_sizes = [round(d_v * multiples[i+1]) for i in range(depth)]
 
         # layers going down to abstract representation
+        #
         self.down_stack = nn.ModuleList([
-            UNetEncoderLayer(layer_sizes[i+1], d_inner, n_head, d_k_sizes[i], d_v_sizes[i], dropout=dropout,
+            UNetEncoderLayer(layer_sizes[i+1], inner_sizes[i+1], n_head, d_k_sizes[i], d_v_sizes[i], dropout=dropout,
                              type='down', d_in=layer_sizes[i])
             for i in range(depth)])
 
@@ -173,7 +175,7 @@ class UNetEncoder(nn.Module):
 
         # layers going up to output representation
         self.up_stack = nn.ModuleList([
-            UNetEncoderLayer(layer_sizes[i+1], d_inner, n_head, d_k, d_v, dropout=dropout,
+            UNetEncoderLayer(layer_sizes[i+1], inner_sizes[i+1], n_head, d_k_sizes[i], d_v_sizes[i], dropout=dropout,
                              type='up', d_in=layer_sizes[i])
             for i in range(depth)])
 
@@ -219,8 +221,9 @@ class UNetEncoder(nn.Module):
             layer_non_pad = self.maxpool1d(layer_non_pad.transpose(1, 2)).squeeze(1).unsqueeze(2)
 
             # compute slf_attn_mask from pad specifications for current and previous layer
+            # TODO changing pad mask to go from pooled dim to pooled dim
             len_q = layer_non_pad.size(1)
-            padding_mask = (1 - prev_layer_non_pad).squeeze(2).byte()
+            padding_mask = (1 - layer_non_pad).squeeze(2).byte()
             padding_mask = padding_mask.unsqueeze(1).expand(-1, len_q, -1)  # b x lq x lk
 
             enc_output, enc_slf_attn = layer(
@@ -232,6 +235,7 @@ class UNetEncoder(nn.Module):
 
             # store transposed attention masks for unet decoder
 
+            # TODO removed prev_
             up_outputs.append(enc_output)
             layer_pairs.append((prev_layer_non_pad, layer_non_pad))
 
@@ -256,7 +260,8 @@ class UNetEncoder(nn.Module):
 
             # compute slf_attn_mask from pad specifications for current and previous layer
             len_q = layer_non_pad.size(1)
-            padding_mask = (1 - prev_layer_non_pad).squeeze(2).byte()
+            #TODO removed prev_
+            padding_mask = (1 - layer_non_pad).squeeze(2).byte()
             padding_mask = padding_mask.unsqueeze(1).expand(-1, len_q, -1)  # b x lq x lk
 
             # if not first decoder layer, we add input of previous layer with skip connection to respective down layer
