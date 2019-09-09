@@ -28,7 +28,7 @@ class EncoderLayer(nn.Module):
 
 
 class UNetEncoderLayer(nn.Module):
-    def __init__(self, d_out, d_inner, n_head, d_k, d_v, dropout=0.1, type='same', skip_connect=False, d_in=None):
+    def __init__(self, d_out, d_inner, n_head, d_k, d_v, dropout=0.1, type_='same', skip_connect=False, d_in=None):
         super(UNetEncoderLayer, self).__init__()
 
         d_in = d_in if d_in is not None else d_out  # size of input to unet layer
@@ -42,14 +42,14 @@ class UNetEncoderLayer(nn.Module):
 
         self.skip_connect = skip_connect
 
-        self.type = type
-        if type == 'down':
+        self.type = type_
+        if type_ == 'down':
             # half size of output
             self.conv = nn.Conv1d(d_in, d_out, kernel_size=3, stride=2, padding=1)
-        elif type == 'same':
+        elif type_ == 'same':
             # keep size of output the same
             self.conv = nn.Conv1d(d_in, d_out, kernel_size=3, padding=1)
-        elif type == 'up':
+        elif type_ == 'up':
             # double size of output
             self.conv = nn.ConvTranspose1d(d_in, d_out, kernel_size=3, stride=2, padding=1)
         else:

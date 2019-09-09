@@ -15,7 +15,7 @@ __author__ = "Yu-Hsiang Huang"
 
 def batched_index_select(input, dim, index):
     views = [input.shape[0]] + \
-		[1 if i != dim else -1 for i in torch.arange(1, len(input.shape))]
+        [1 if i != dim else -1 for i in torch.arange(1, len(input.shape))]
     expanse = list(input.shape)
     expanse[0] = -1
     expanse[dim] = -1
@@ -108,7 +108,7 @@ class Encoder(nn.Module):
 
         wandb.log({'word_emb_std': enc_output.std()})
 
-        enc_output = enc_output + self.position_enc(src_pos) # * self.position_bias
+        enc_output = enc_output + self.position_enc(src_pos)  # * self.position_bias
 
         if src_segs is not None:
             enc_output = enc_output + self.seg_enc(src_segs)
@@ -152,8 +152,8 @@ class UNetEncoder(nn.Module):
 
         assert n_layers % 2 == 0  # we have equal up layers as down layers
 
-        self.in_layer = UNetEncoderLayer(d_model, d_inner, n_head, d_k, d_v, dropout=dropout, type='same', skip_connect=True)
-        self.out_layer = UNetEncoderLayer(d_model, d_inner, n_head, d_k, d_v, dropout=dropout, type='same', skip_connect=True)
+        self.in_layer = UNetEncoderLayer(d_model, d_inner, n_head, d_k, d_v, dropout=dropout, type_='same', skip_connect=True)
+        self.out_layer = UNetEncoderLayer(d_model, d_inner, n_head, d_k, d_v, dropout=dropout, type_='same', skip_connect=True)
 
         depth = n_layers // 2 - 1
 
@@ -168,7 +168,7 @@ class UNetEncoder(nn.Module):
         #
         self.down_stack = nn.ModuleList([
             UNetEncoderLayer(layer_sizes[i+1], inner_sizes[i+1], n_head, d_k_sizes[i], d_v_sizes[i], dropout=dropout,
-                             type='down', d_in=layer_sizes[i])
+                             type_='down', d_in=layer_sizes[i])
             for i in range(depth)])
 
         layer_sizes.reverse()
@@ -176,7 +176,7 @@ class UNetEncoder(nn.Module):
         # layers going up to output representation
         self.up_stack = nn.ModuleList([
             UNetEncoderLayer(layer_sizes[i+1], inner_sizes[i+1], n_head, d_k_sizes[i], d_v_sizes[i], dropout=dropout,
-                             type='up', d_in=layer_sizes[i])
+                             type_='up', d_in=layer_sizes[i])
             for i in range(depth)])
 
         self.maxpool1d = nn.MaxPool1d(3, stride=2, padding=1)
@@ -197,7 +197,7 @@ class UNetEncoder(nn.Module):
         # start with bit representation of padding tokens (non_pad_mask)
 
         slf_attn_list = []
-        up_outputs = []
+        down_outputs = []
 
         ######### INPUT LAYER ###########
 
@@ -236,14 +236,14 @@ class UNetEncoder(nn.Module):
             # store transposed attention masks for unet decoder
 
             # TODO removed prev_
-            up_outputs.append(enc_output)
+            down_outputs.append(enc_output)
             layer_pairs.append((prev_layer_non_pad, layer_non_pad))
 
             if return_attns:
                 slf_attn_list += [enc_slf_attn]
 
         # we align every up layer with the corresponding down layer
-        up_outputs.reverse()
+        down_outputs.reverse()
         layer_pairs.reverse()
 
         enc_output = None  # the first layer of the decoder will not receive input from another decoder layer
@@ -253,7 +253,7 @@ class UNetEncoder(nn.Module):
 
         ####### UP LAYERS #############
 
-        for layer, up_output, pair in zip(self.up_stack, up_outputs, layer_pairs):
+        for layer, down_output, pair in zip(self.up_stack, down_outputs, layer_pairs):
 
             # reverse ordering, since we are upsampling now instead of down
             layer_non_pad, prev_layer_non_pad = pair
@@ -265,7 +265,7 @@ class UNetEncoder(nn.Module):
             padding_mask = padding_mask.unsqueeze(1).expand(-1, len_q, -1)  # b x lq x lk
 
             # if not first decoder layer, we add input of previous layer with skip connection to respective down layer
-            layer_input = enc_output + up_output if enc_output is not None else up_output
+            layer_input = enc_output + down_output if enc_output is not None else down_output
 
             enc_output, enc_slf_attn = layer(
                 layer_input,  # HERE WE ADD OUTPUT OF PREVIOUS LAYER WITH SKIP CONNECTION FROM DOWN LAYER
