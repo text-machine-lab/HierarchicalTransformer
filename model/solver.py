@@ -91,6 +91,7 @@ class MyDataParallel(torch.nn.DataParallel):
 
 class Solver(object):
     def __init__(self, config, train_data_loader, eval_data_loader, test_data_loader, vocab, is_train=True, model=None, parallel=True):
+        """This object contains all training and inference code, and receives datasets as input."""
         self.config = config
         self.epoch_i = 0
         self.train_data_loader = train_data_loader
@@ -105,7 +106,9 @@ class Solver(object):
 
     @time_desc_decorator('Build Graph')
     def build(self, cuda=True):
-
+        """Manually called constructor for the Solver object. Initializes the chosen model from models.py, restores
+        it from save if specified by the --restore flag and initializes wandb with model configuration details. Also
+        sets up the optimizer."""
         if self.model is None:
             self.model = getattr(models, self.config.model)(self.config)
 
@@ -131,11 +134,6 @@ class Solver(object):
 
         if not self.config.tg_enable:
             alert.disable = True
-
-        # self.writer = SummaryWriter('logdir/' + str(datetime.datetime.now()) + '|model='
-        #                             + str(type(self.model)) + '|epochs=' + str(self.config.n_epoch) +
-        #                             '|batches=' + str(len(self.train_data_loader)) + '|enc=' + self.config.encoder_type +
-        #                             '|dec=' + self.config.decoder_type + '|msg=' + self.config.msg)
 
         n_params = sum([param.numel() for param in self.model.parameters()])
         print('Number of parameters: %s' % n_params)
@@ -171,12 +169,14 @@ class Solver(object):
                 lr=self.config.learning_rate)
 
     def save_model(self, epoch):
+        """Saves model checkpoint in folder to file numbered by epoch, e.g. 1.pkl"""
         """Save parameters to checkpoint"""
         ckpt_path = os.path.join(self.config.save_path, f'{epoch}.pkl')
         print(f'Save parameters to {ckpt_path}')
         torch.save(self.model.state_dict(), ckpt_path)
 
     def load_model(self, checkpoint):
+        """Loads specific checkpoint, if directory is given it will load the checkpoint from the largest epoch."""
         """Load parameters from checkpoint"""
 
         def fileEpoch(file):
@@ -194,48 +194,49 @@ class Solver(object):
         self.epoch_i = int(epoch)
         self.model.load_state_dict(torch.load(checkpoint))
 
-    def write_summary(self, epoch_i):
-        epoch_loss = getattr(self, 'epoch_loss', None)
-        if epoch_loss is not None:
-            self.writer.update_loss(
-                loss=epoch_loss,
-                step_i=epoch_i + 1,
-                name='train_loss')
-
-        epoch_recon_loss = getattr(self, 'epoch_recon_loss', None)
-        if epoch_recon_loss is not None:
-            self.writer.update_loss(
-                loss=epoch_recon_loss,
-                step_i=epoch_i + 1,
-                name='train_recon_loss')
-
-        epoch_kl_div = getattr(self, 'epoch_kl_div', None)
-        if epoch_kl_div is not None:
-            self.writer.update_loss(
-                loss=epoch_kl_div,
-                step_i=epoch_i + 1,
-                name='train_kl_div')
-
-        kl_mult = getattr(self, 'kl_mult', None)
-        if kl_mult is not None:
-            self.writer.update_loss(
-                loss=kl_mult,
-                step_i=epoch_i + 1,
-                name='kl_mult')
-
-        epoch_bow_loss = getattr(self, 'epoch_bow_loss', None)
-        if epoch_bow_loss is not None:
-            self.writer.update_loss(
-                loss=epoch_bow_loss,
-                step_i=epoch_i + 1,
-                name='bow_loss')
-
-        validation_loss = getattr(self, 'validation_loss', None)
-        if validation_loss is not None:
-            self.writer.update_loss(
-                loss=validation_loss,
-                step_i=epoch_i + 1,
-                name='validation_loss')
+    # def write_summary(self, epoch_i):
+    #     """Not used."""
+    #     epoch_loss = getattr(self, 'epoch_loss', None)
+    #     if epoch_loss is not None:
+    #         self.writer.update_loss(
+    #             loss=epoch_loss,
+    #             step_i=epoch_i + 1,
+    #             name='train_loss')
+    #
+    #     epoch_recon_loss = getattr(self, 'epoch_recon_loss', None)
+    #     if epoch_recon_loss is not None:
+    #         self.writer.update_loss(
+    #             loss=epoch_recon_loss,
+    #             step_i=epoch_i + 1,
+    #             name='train_recon_loss')
+    #
+    #     epoch_kl_div = getattr(self, 'epoch_kl_div', None)
+    #     if epoch_kl_div is not None:
+    #         self.writer.update_loss(
+    #             loss=epoch_kl_div,
+    #             step_i=epoch_i + 1,
+    #             name='train_kl_div')
+    #
+    #     kl_mult = getattr(self, 'kl_mult', None)
+    #     if kl_mult is not None:
+    #         self.writer.update_loss(
+    #             loss=kl_mult,
+    #             step_i=epoch_i + 1,
+    #             name='kl_mult')
+    #
+    #     epoch_bow_loss = getattr(self, 'epoch_bow_loss', None)
+    #     if epoch_bow_loss is not None:
+    #         self.writer.update_loss(
+    #             loss=epoch_bow_loss,
+    #             step_i=epoch_i + 1,
+    #             name='bow_loss')
+    #
+    #     validation_loss = getattr(self, 'validation_loss', None)
+    #     if validation_loss is not None:
+    #         self.writer.update_loss(
+    #             loss=validation_loss,
+    #             step_i=epoch_i + 1,
+    #             name='validation_loss')
 
     # def format_convos_for_transformer(self, conversations):
     #     empty = [0] * self.config.max_unroll
@@ -264,6 +265,8 @@ class Solver(object):
 
     @time_desc_decorator('Training Start!')
     def train(self):
+        """Trains the HRED, sequence-to-sequence, Transformer and U-Net Transformer models. The 3 latter models are
+        combined into one MULTI class contained in models.py."""
         epoch_loss_history = []
 
         #print('Test before training')
@@ -400,7 +403,7 @@ class Solver(object):
 
     def generate_sentence(self, input_sentences, input_histories, input_sentence_length,
                           input_conversation_length, target_sentences, file=None, verbose=True):
-
+        """Generates a sentence from the HRED model only."""
         self.model.eval()
 
         # save to a text file
@@ -433,6 +436,7 @@ class Solver(object):
 
 
     def generate_transformer_sentence(self, input_histories, history_segments, target_sentences, file=None, verbose=True):
+        """Generate a sentence from the sequence-to-sequence (S2SA), Transformer or U-Net Transformer models."""
         self.model.eval()
 
         #gold = self.add_sos(target_sentences)
@@ -465,7 +469,8 @@ class Solver(object):
 
 
     def evaluate(self):
-
+        """Calculate cross entropy on the validation set, also print out generated sentences. This runs once per
+        epoch."""
         self.model.eval()
         batch_loss_history = []
         n_total_words = 0
@@ -529,6 +534,7 @@ class Solver(object):
         return epoch_loss
 
     def test(self):
+        """Evaluates per-word perplexity."""
         self.model.eval()
         batch_loss_history = []
         n_total_words = 0
