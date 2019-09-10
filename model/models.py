@@ -100,6 +100,7 @@ class MULTI(nn.Module):
                               config.decoder_hidden_size * 4, encoder=config.encoder_type,
                               decoder=config.decoder_type, n_layers=config.num_layers, tgt_emb_prj_weight_sharing=False)
 
+        # translator can perform beam decoding as well as top-k sampling with the MultiModel/Transformer
         self.translator = Translator(model=self.model, beam_size=config.beam_size,
                                      max_seq_len=config.gen_response_len)
 

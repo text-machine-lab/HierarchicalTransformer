@@ -2,6 +2,7 @@
 import argparse
 import torch
 import transformer.Constants as Constants
+from tqdm import tqdm
 
 def read_instances_from_file(inst_file, max_sent_len, keep_case):
     ''' Convert file into word seq lists and vocab '''
@@ -9,7 +10,7 @@ def read_instances_from_file(inst_file, max_sent_len, keep_case):
     word_insts = []
     trimmed_sent_count = 0
     with open(inst_file) as f:
-        for sent in f:
+        for sent in tqdm(f):
             if not keep_case:
                 sent = sent.lower()
             words = sent.split()

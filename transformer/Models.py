@@ -106,8 +106,6 @@ class Encoder(nn.Module):
         # -- Forward
         enc_output = self.src_word_emb(src_seq)
 
-        wandb.log({'word_emb_std': enc_output.std()})
-
         enc_output = enc_output + self.position_enc(src_pos) # * self.position_bias
 
         if src_segs is not None:
@@ -128,7 +126,7 @@ class Encoder(nn.Module):
 
 
 class UNetEncoder(nn.Module):
-    ''' A encoder model with self attention mechanism. '''
+    ''' Modified Transformer encoder with down and up layers which form a U-Net hierarchy.'''
 
     def __init__(
             self,
@@ -152,13 +150,16 @@ class UNetEncoder(nn.Module):
 
         assert n_layers % 2 == 0  # we have equal up layers as down layers
 
-        self.in_layer = UNetEncoderLayer(d_model, d_inner, n_head, d_k, d_v, dropout=dropout, type='same', skip_connect=True)
-        self.out_layer = UNetEncoderLayer(d_model, d_inner, n_head, d_k, d_v, dropout=dropout, type='same', skip_connect=True)
+        #self.in_layer = UNetEncoderLayer(d_model, d_inner, n_head, d_k, d_v, dropout=dropout, type='same', skip_connect=True)
+        #self.out_layer = UNetEncoderLayer(d_model, d_inner, n_head, d_k, d_v, dropout=dropout, type='same', skip_connect=True)
 
-        depth = n_layers // 2 - 1
+        depth = n_layers
+        #depth = n_layers // 2 - 1
 
         # each layer increases in size by the sqrt of 2 to keep computation relatively constant
-        multiples = [sqrt(2)** i for i in range(depth + 1)]
+        #TODO sqrt 2 ** i
+        multiples = [1 for i in range(depth+1)]
+        #multiples = [sqrt(2) ** i for i in range(depth + 1)]
         layer_sizes = [round(d_model * multiples[i]) for i in range(depth + 1)]  # [d_model for _ in range(depth+1)]  #
         inner_sizes = [round(d_inner * multiples[i]) for i in range(depth + 1)]
         d_k_sizes = [round(d_k * multiples[i+1]) for i in range(depth)]
@@ -166,23 +167,26 @@ class UNetEncoder(nn.Module):
 
         # layers going down to abstract representation
         #
+        # TODO change type to down and up and remove skip connect
         self.down_stack = nn.ModuleList([
             UNetEncoderLayer(layer_sizes[i+1], inner_sizes[i+1], n_head, d_k_sizes[i], d_v_sizes[i], dropout=dropout,
-                             type='down', d_in=layer_sizes[i])
+                             type='same', d_in=layer_sizes[i], skip_connect=True)
             for i in range(depth)])
 
-        layer_sizes.reverse()
+        #layer_sizes.reverse()
 
         # layers going up to output representation
-        self.up_stack = nn.ModuleList([
-            UNetEncoderLayer(layer_sizes[i+1], inner_sizes[i+1], n_head, d_k_sizes[i], d_v_sizes[i], dropout=dropout,
-                             type='up', d_in=layer_sizes[i])
-            for i in range(depth)])
+        # self.up_stack = nn.ModuleList([
+        #     UNetEncoderLayer(layer_sizes[i+1], inner_sizes[i+1], n_head, d_k_sizes[i], d_v_sizes[i], dropout=dropout,
+        #                      type='same', d_in=layer_sizes[i], skip_connect=True)
+        #     for i in range(depth)])
 
-        self.maxpool1d = nn.MaxPool1d(3, stride=2, padding=1)
+        #self.maxpool1d = nn.MaxPool1d(3, stride=2, padding=1)
 
 
     def forward(self, src_seq, src_pos, src_segs=None, return_attns=False):
+
+        # TODO turn U-Net Transformer into Transformer, then slowly turn it back
 
         # -- Prepare masks
         slf_attn_mask = get_attn_key_pad_mask(seq_k=src_seq, seq_q=src_seq)  # b x l
@@ -201,15 +205,16 @@ class UNetEncoder(nn.Module):
 
         ######### INPUT LAYER ###########
 
-        enc_output, enc_slf_attn = self.in_layer(
-            enc_output,
-            non_pad_mask=non_pad_mask,
-            slf_attn_mask=slf_attn_mask)
+        # TODO add back input, output layer and up layers
+        # enc_output, enc_slf_attn = self.in_layer(
+        #     enc_output,
+        #     non_pad_mask=non_pad_mask,
+        #     slf_attn_mask=slf_attn_mask)
 
         first_output = enc_output
 
-        if return_attns:
-            slf_attn_list.append(enc_slf_attn)
+        # if return_attns:
+        #     slf_attn_list.append(enc_slf_attn)
 
         ######### DOWN LAYERS ##########
 
@@ -218,7 +223,7 @@ class UNetEncoder(nn.Module):
         for layer in self.down_stack:
 
             prev_layer_non_pad = layer_non_pad  # b x lq
-            layer_non_pad = self.maxpool1d(layer_non_pad.transpose(1, 2)).squeeze(1).unsqueeze(2)
+            #layer_non_pad = self.maxpool1d(layer_non_pad.transpose(1, 2)).squeeze(1).unsqueeze(2)
 
             # compute slf_attn_mask from pad specifications for current and previous layer
             # TODO changing pad mask to go from pooled dim to pooled dim
@@ -246,41 +251,41 @@ class UNetEncoder(nn.Module):
         up_outputs.reverse()
         layer_pairs.reverse()
 
-        enc_output = None  # the first layer of the decoder will not receive input from another decoder layer
+        #enc_output = None  # the first layer of the decoder will not receive input from another decoder layer
         # otherwise, it wouldn't be the first layer
 
         # decoder uses computed attention masks from unet encoder
 
         ####### UP LAYERS #############
 
-        for layer, up_output, pair in zip(self.up_stack, up_outputs, layer_pairs):
-
-            # reverse ordering, since we are upsampling now instead of down
-            layer_non_pad, prev_layer_non_pad = pair
-
-            # compute slf_attn_mask from pad specifications for current and previous layer
-            len_q = layer_non_pad.size(1)
-            #TODO removed prev_
-            padding_mask = (1 - layer_non_pad).squeeze(2).byte()
-            padding_mask = padding_mask.unsqueeze(1).expand(-1, len_q, -1)  # b x lq x lk
-
-            # if not first decoder layer, we add input of previous layer with skip connection to respective down layer
-            layer_input = enc_output + up_output if enc_output is not None else up_output
-
-            enc_output, enc_slf_attn = layer(
-                layer_input,  # HERE WE ADD OUTPUT OF PREVIOUS LAYER WITH SKIP CONNECTION FROM DOWN LAYER
-                non_pad_mask=layer_non_pad,
-                slf_attn_mask=padding_mask)
-
-            if return_attns:
-                slf_attn_list += [enc_slf_attn]
-
-        ######## OUTPUT LAYER #############
-
-        enc_output, enc_slf_attn = self.out_layer(
-            enc_output + first_output,  # HERE WE ADD FIRST DOWN LAYER OUTPUT FOR FINAL PREDICTION
-            non_pad_mask=non_pad_mask,
-            slf_attn_mask=slf_attn_mask)
+        # for layer, up_output, pair in zip(self.up_stack, up_outputs, layer_pairs):
+        #
+        #     # reverse ordering, since we are upsampling now instead of down
+        #     layer_non_pad, prev_layer_non_pad = pair
+        #
+        #     # compute slf_attn_mask from pad specifications for current and previous layer
+        #     len_q = layer_non_pad.size(1)
+        #     #TODO removed prev_
+        #     padding_mask = (1 - layer_non_pad).squeeze(2).byte()
+        #     padding_mask = padding_mask.unsqueeze(1).expand(-1, len_q, -1)  # b x lq x lk
+        #
+        #     # if not first decoder layer, we add input of previous layer with skip connection to respective down layer
+        #     layer_input = enc_output + up_output if enc_output is not None else up_output
+        #
+        #     enc_output, enc_slf_attn = layer(
+        #         layer_input,  # HERE WE ADD OUTPUT OF PREVIOUS LAYER WITH SKIP CONNECTION FROM DOWN LAYER
+        #         non_pad_mask=layer_non_pad,
+        #         slf_attn_mask=padding_mask)
+        #
+        #     if return_attns:
+        #         slf_attn_list += [enc_slf_attn]
+        #
+        # ######## OUTPUT LAYER #############
+        #
+        # enc_output, enc_slf_attn = self.out_layer(
+        #     enc_output + first_output,  # HERE WE ADD FIRST DOWN LAYER OUTPUT FOR FINAL PREDICTION
+        #     non_pad_mask=non_pad_mask,
+        #     slf_attn_mask=slf_attn_mask)
 
         if return_attns:
             slf_attn_list.append(enc_slf_attn)
@@ -346,6 +351,7 @@ class Decoder(nn.Module):
 
 
 class GRUEncoder(nn.Module):
+    ''''''
     def __init__(self, n_src_vocab, d_model):
         super().__init__()
         self.src_word_emb = nn.Embedding(n_src_vocab, d_model, padding_idx=Constants.PAD)

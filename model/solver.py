@@ -70,11 +70,11 @@ def extract_history_response(conversations):
     # input_conversation_length_shuf = [pair[4] for pair in pairs]
     input_histories_shuf, input_history_segs_shuf, target_sentences_shuf, input_sentences_shuf = zip(*pairs)
 
-    input_histories = to_var(torch.LongTensor(input_histories_shuf))
-    target_sentences = to_var(torch.LongTensor(target_sentences_shuf))
-    input_sentences = to_var(torch.LongTensor(input_sentences_shuf))
-    history_segments = to_var(torch.LongTensor(input_history_segs_shuf))
-    conv_lens = to_var(torch.LongTensor(input_conversation_length))
+    input_histories = to_var(torch.LongTensor(input_histories_shuf), async=True)
+    target_sentences = to_var(torch.LongTensor(target_sentences_shuf), async=True)
+    input_sentences = to_var(torch.LongTensor(input_sentences_shuf), async=True)
+    history_segments = to_var(torch.LongTensor(input_history_segs_shuf), async=True)
+    conv_lens = to_var(torch.LongTensor(input_conversation_length), async=True)
 
     return input_histories, history_segments, target_sentences, input_sentences, conv_lens
 
@@ -268,7 +268,7 @@ class Solver(object):
         """Trains the HRED, sequence-to-sequence, Transformer and U-Net Transformer models. The 3 latter models are
         combined into one MULTI class contained in models.py."""
         epoch_loss_history = []
-
+        self.model.train()
         #print('Test before training')
         #self.test()
 
@@ -304,16 +304,14 @@ class Solver(object):
 
                     # MAKE SURE THAT EVALUATION FUNCTION MATCHES THESE RESTRICTIONS ON INPUT SIZE!!!
 
-                    wandb.log({'hist_max_len': (input_histories != 0).float().sum(1).max()})
+
 
                     # TODO right align input histories and prune from left
 
                     input_histories = input_histories[:, :self.config.max_history]
                     history_segments = history_segments[:, :self.config.max_history]
 
-                self.model.train()
                 self.optimizer.zero_grad()
-
 
                 if isinstance(self.model, MULTI):
                     sentence_logits = self.model(input_histories, history_segments, target_sentences, decode=False)
@@ -321,24 +319,17 @@ class Solver(object):
                     sentence_logits = self.model(input_sentences, input_sentence_length, input_conversation_length,
                                                  target_sentences, decode=False)
 
+
                 batch_loss, n_words = masked_cross_entropy(
                     sentence_logits,
                     target_sentences,
                     target_sentence_length)
 
-                wandb.log({'memory_used': get_gpu_memory_used()})
-
                 # Back-propagation
                 batch_loss.backward()
 
-                if isinstance(self.model, MULTI):
-                    wandb.log({'word_grad': self.model.model.encoder.src_word_emb.weight.grad.abs().mean()})
-
                 # Gradient cliping
                 norm = torch.nn.utils.clip_grad_norm_(self.model.parameters(), self.config.clip)
-
-                #self.writer.add_scalar('grad_norm', norm, tb_idx)
-                wandb.log({'grad_norm': norm})
 
                 # Run optimizer
                 self.optimizer.step()
@@ -353,7 +344,14 @@ class Solver(object):
                 #self.writer.add_scalar('Training_loss_change', current_loss - prev_loss, tb_idx)
                 #prev_loss = current_loss
 
-                wandb.log({'train_loss': current_loss})
+                if batch_i % 10 == 0:
+                    wandb.log({'hist_max_len': (input_histories != 0).float().sum(1).max()})
+                    wandb.log({'grad_norm': norm})
+                    wandb.log({'memory_used': get_gpu_memory_used()})
+                    wandb.log({'train_loss': current_loss})
+
+                    if isinstance(self.model, MULTI):
+                        wandb.log({'word_grad': self.model.model.encoder.src_word_emb.weight.grad.abs().mean()})
 
                 # if batch_i % self.config.print_every == 0:
                 #     tqdm.write(
@@ -371,6 +369,8 @@ class Solver(object):
             if self.validation_loss <= min_validation_loss:
                 min_validation_loss = self.validation_loss
                 min_val_loss_epoch = epoch_i
+
+            self.model.train()
 
             if min_validation_loss == self.validation_loss:
                 print('Lowest validation loss yet. Saving')
@@ -492,7 +492,7 @@ class Solver(object):
 
                 #if isinstance(self.model, TRANSFORMER):
 
-                    # this can protect against random memory shortages
+                # this can protect against random memory shortages
                 input_histories = input_histories[:, :self.config.max_history]
                 history_segments = history_segments[:, :self.config.max_history]
                     # target_sentences = target_sentences[:self.config.max_convo_len, :self.config.max_unroll]
@@ -576,6 +576,7 @@ class Solver(object):
                                                  target_sentences, decode=False)
 
 
+                # to perform human evaluation, we need to write example generated responses to a full samples file
                 if self.config.full_samples_file is not None:
 
                     if self.config.max_samples is None or self.config.max_samples >= batch_i * self.config.batch_size:
@@ -615,6 +616,7 @@ class Solver(object):
         return word_perplexity
 
     def embedding_metric(self):
+        #TODO implement embedding evaluation.
         word2vec =  getattr(self, 'word2vec', None)
         if word2vec is None:
             print('Loading word2vec model')

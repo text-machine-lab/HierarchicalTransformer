@@ -48,7 +48,7 @@ class DialogDataset(Dataset):
         return [self.vocab.sent2id(sentence) for sentence in sentences]
 
 
-def get_loader(sentences, conversation_length, sentence_length, vocab, batch_size=100, data=None, max_examples=None, shuffle=True):
+def get_loader(sentences, conversation_length, sentence_length, vocab, batch_size=100, n_workers=8, data=None, max_examples=None, shuffle=True):
     """Load DataLoader of given DialogDataset"""
 
     def collate_fn(data):
@@ -80,6 +80,8 @@ def get_loader(sentences, conversation_length, sentence_length, vocab, batch_siz
         dataset=dataset,
         batch_size=batch_size,
         shuffle=shuffle,
-        collate_fn=collate_fn)
+        collate_fn=collate_fn,
+        num_workers=n_workers,
+        pin_memory=True)
 
     return data_loader

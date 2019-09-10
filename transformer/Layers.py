@@ -57,6 +57,7 @@ class UNetEncoderLayer(nn.Module):
 
     def forward(self, enc_input, non_pad_mask=None, slf_attn_mask=None):
 
+        # TODO uncomment this
         conv_input = enc_input.transpose(1, 2)  # (batch_size, emb_size, n_steps)
 
         if self.type != 'up':
@@ -76,6 +77,8 @@ class UNetEncoderLayer(nn.Module):
         norm_input = enc_input + conv_output if self.skip_connect else conv_output
 
         norm_output = self.norm(norm_input)
+
+        #norm_output = enc_input
 
         # here the output of the convolution performs attention over the input
         #TODO see if using norm output helps

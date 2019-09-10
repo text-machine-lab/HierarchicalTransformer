@@ -140,7 +140,7 @@ def get_config(parse=True, **optional_kwargs):
     parser.add_argument('--kl_annealing_iter', type=int, default=25000)
     parser.add_argument('--importance_sample', type=int, default=100)
     parser.add_argument('--sentence_drop', type=float, default=0.0)
-    parser.add_argument('--restore', action='store_true', default=False)
+    parser.add_argument('--restore', action='store_true', default=False)  # restore model from save file in save_dir
 
     # Generation
     parser.add_argument('--n_context', type=int, default=1)
