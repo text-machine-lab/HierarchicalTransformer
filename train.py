@@ -20,6 +20,7 @@ import datetime
 
 writer = None
 
+
 def cal_performance(pred, gold, smoothing=False):
     ''' Apply label smoothing if needed '''
 
@@ -65,7 +66,6 @@ def train_epoch(epoch_idx, model, training_data, optimizer, device, smoothing):
     n_word_total = 0
     n_word_correct = 0
 
-
     for batch_idx, batch in enumerate(tqdm(training_data, desc='  - (Training)   ', leave=False)):
 
         # prepare data
@@ -97,6 +97,7 @@ def train_epoch(epoch_idx, model, training_data, optimizer, device, smoothing):
     loss_per_word = total_loss/n_word_total
     accuracy = n_word_correct/n_word_total
     return loss_per_word, accuracy
+
 
 def eval_epoch(epoch_idx, model, validation_data, device):
     ''' Epoch operation in evaluation phase '''
@@ -134,6 +135,7 @@ def eval_epoch(epoch_idx, model, validation_data, device):
 
     accuracy = n_word_correct/n_word_total
     return loss_per_word, accuracy
+
 
 def train(model, training_data, validation_data, optimizer, device, opt):
     ''' Start training '''
@@ -289,7 +291,7 @@ def main():
             betas=(0.9, 0.98), eps=1e-09),
         opt.d_model, opt.n_warmup_steps, lr_factor=opt.lr_factor)
 
-    train(transformer, training_data, validation_data, optimizer, device ,opt)
+    train(transformer, training_data, validation_data, optimizer, device, opt)
 
 
 def prepare_dataloaders(data, opt):
