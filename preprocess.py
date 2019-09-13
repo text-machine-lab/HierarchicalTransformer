@@ -1,7 +1,10 @@
 ''' Handling the data io '''
 import argparse
+from datetime import datetime
+
 import torch
 import transformer.Constants as Constants
+from tqdm import tqdm
 
 def read_instances_from_file(inst_file, max_sent_len, keep_case):
     ''' Convert file into word seq lists and vocab '''
@@ -9,7 +12,7 @@ def read_instances_from_file(inst_file, max_sent_len, keep_case):
     word_insts = []
     trimmed_sent_count = 0
     with open(inst_file) as f:
-        for sent in f:
+        for sent in tqdm(f, postfix='reading input file'):
             if not keep_case:
                 sent = sent.lower()
             words = sent.split()
@@ -88,6 +91,7 @@ def main():
     opt.max_token_seq_len = opt.max_word_seq_len + 2 # include the <s> and </s>
 
     # Training set
+    print('[Info] Reading training set')
     train_src_word_insts = read_instances_from_file(
         opt.train_src, opt.max_word_seq_len, opt.keep_case)
     train_tgt_word_insts = read_instances_from_file(
@@ -104,6 +108,7 @@ def main():
         (s, t) for s, t in zip(train_src_word_insts, train_tgt_word_insts) if s and t]))
 
     # Validation set
+    print('[Info] Reading validation set')
     valid_src_word_insts = read_instances_from_file(
         opt.valid_src, opt.max_word_seq_len, opt.keep_case)
     valid_tgt_word_insts = read_instances_from_file(
@@ -120,6 +125,7 @@ def main():
         (s, t) for s, t in zip(valid_src_word_insts, valid_tgt_word_insts) if s and t]))
 
     # Build vocabulary
+    print('[Info] Building the vocabulary')
     if opt.vocab:
         predefined_data = torch.load(opt.vocab)
         assert 'dict' in predefined_data
@@ -185,5 +191,8 @@ def main():
     torch.save(data, opt.save_data)
     print('[Info] Finish.')
 
+
 if __name__ == '__main__':
+    print(f'[Info] starting preprocessing script, current time: {datetime.now()}')
     main()
+    print('[Info] Done!')
