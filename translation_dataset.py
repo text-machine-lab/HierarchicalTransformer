@@ -1,8 +1,10 @@
+import random
 import numpy as np
 import torch
 import torch.utils.data
 
 from transformer import Constants
+
 
 def paired_collate_fn(insts):
     src_insts, tgt_insts = list(zip(*insts))
@@ -10,9 +12,9 @@ def paired_collate_fn(insts):
     tgt_insts = collate_fn(tgt_insts)
     return (*src_insts, *tgt_insts)
 
+
 def collate_fn(insts):
     ''' Pad the instance to the max seq length in batch '''
-
     max_len = max(len(inst) for inst in insts)
 
     batch_seq = np.array([
@@ -27,6 +29,7 @@ def collate_fn(insts):
     batch_pos = torch.LongTensor(batch_pos)
 
     return batch_seq, batch_pos
+
 
 class TranslationDataset(torch.utils.data.Dataset):
     def __init__(
@@ -88,3 +91,115 @@ class TranslationDataset(torch.utils.data.Dataset):
         if self._tgt_insts:
             return self._src_insts[idx], self._tgt_insts[idx]
         return self._src_insts[idx]
+
+
+class StreamingTranslationDataset(torch.utils.data.Dataset):
+    def __init__(self, src_fpath, tgt_fpath, src_tokenizer, tgt_tokenizer,
+                 buffer_size=100_000, shuffle=True, preprocess_fn=None):
+        ''' Streaming translation dataset does not store whole dataset in a memory.
+            Also, data is preprocessed on-the-fly
+
+            Note: Use it ONLY in Dataloader(shuffle=False),
+                  shuffle flag should be specified in this object
+
+            Note: for correct behavior, batch size of the Dataloader should be such
+            that buffer_size % batch_size == 0
+
+        :param *_fpath: str, path to the text file with sentences separated with \n
+        :param *_tokenizer: function, str -> list of indices
+        :param buffer_size: int, read buffer size
+        :param shuffle: bool, shuffle buffer
+        :param preprocess_fn: function, str -> str, applied before tokenization
+        '''
+
+        self.src_fpath = src_fpath
+        self.tgt_fpath = tgt_fpath
+        self.src_tokenizer = src_tokenizer
+        self.tgt_tokenizer = tgt_tokenizer
+        self.buffer_size = buffer_size
+        self.shuffle = shuffle
+
+        self.open_files()
+        self._length = None  # lazy
+
+        self._src_buffer = None
+        self._tgt_buffer = None
+
+        self._preprocess_fn = preprocess_fn
+
+    def open_files(self):
+        self._src_file = open(self.src_fpath)
+        self._tgt_file = open(self.tgt_fpath)
+        self._index = 0
+
+    def close_files(self):
+        self._src_file.close()
+        self._tgt_file.close()
+
+    def __del__(self):
+        self.close_files()
+
+    def fill_buffers(self):
+        src_buffer = []
+        tgt_buffer = []
+        for _ in range(self.buffer_size):
+            self._index += 1
+
+            src_line = self._src_file.readline().strip()
+            tgt_line = self._tgt_file.readline().strip()
+
+            if not src_line:
+                if tgt_line:
+                    raise RuntimeError('Source and target files have different number of sentences')
+                self.close_files()
+                self.open_files()
+                break
+
+            src_buffer.append(src_line)
+            tgt_buffer.append(tgt_line)
+
+        if self.shuffle:
+            # Note: dataloader should support smaller batch size at the end of the epoch
+            random_premutation = np.random.permutation(len(src_buffer))
+            src_buffer = [src_buffer[i] for i in random_premutation]
+            tgt_buffer = [tgt_buffer[i] for i in random_premutation]
+
+        self._src_buffer = src_buffer
+        self._tgt_buffer = tgt_buffer
+
+    def preprocess(self, line, type_):
+        '''
+        :param type_: 'src' or 'tgt'
+        '''
+        if type_ not in ('src', 'tgt'):
+            raise ValueError('type_ sould be either "src" or "tgt"')
+
+        tokenize = self.src_tokenizer
+        if type_ == 'tgt':
+            tokenize = self.tgt_tokenizer
+
+        if self._preprocess_fn is not None:
+            line = self._preprocess_fn(line)
+        return tokenize(line)
+
+    def __len__(self):
+        if not self._length:
+            with open(self.src_fpath) as f:
+                for i, _ in enumerate(f): pass  # noqa: E701
+            self._length = i
+        return self._length
+
+    def __getitem__(self, idx):
+        if idx % self.buffer_size == 0 or self._src_buffer is None:
+            # Note: ensure that the whole batch is in one buffer
+            # this may be important when accessing elements in parallel
+            self.fill_buffers()
+            idx = idx % self.buffer_size
+
+        src_line = self._src_buffer[idx]
+        tgt_line = self._tgt_buffer[idx]
+
+        src_tokens = self.preprocess(src_line, type_='src')
+        tgt_tokens = self.preprocess(tgt_line, type_='tgt')
+
+        return src_tokens, tgt_tokens
