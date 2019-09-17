@@ -108,6 +108,7 @@ class Encoder(nn.Module):
 
         wandb.log({'word_emb_std': enc_output.std()})
 
+        # if index out of range error, probably dataset has sequences > max length
         enc_output = enc_output + self.position_enc(src_pos)  # * self.position_bias
 
         if src_segs is not None:
@@ -189,6 +190,7 @@ class UNetEncoder(nn.Module):
         non_pad_mask = get_non_pad_mask(src_seq)  # b x lq x lk
 
         # -- Forward
+        # if index out of range error, probably dataset has sequences > max length
         enc_output = self.src_word_emb(src_seq) + self.position_enc(src_pos)
 
         if src_segs is not None:
@@ -327,6 +329,7 @@ class Decoder(nn.Module):
         dec_enc_attn_mask = get_attn_key_pad_mask(seq_k=src_seq, seq_q=tgt_seq)
 
         # -- Forward
+        # if index out of range error, probably dataset has sequences > max length
         dec_output = self.tgt_word_emb(tgt_seq) + self.position_enc(tgt_pos)
 
         for dec_layer in self.layer_stack:

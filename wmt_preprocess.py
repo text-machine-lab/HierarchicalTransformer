@@ -4,6 +4,7 @@ import json
 import argparse
 import youtokentome as yttm
 
+import transformer.Constants as Constants
 
 N_TOKENS = 32_000
 VERBOSE = True
@@ -16,10 +17,12 @@ def train_bpe(train_src, train_tgt, saveto, vocab_size, verbose=False):
 
     # coverage is 0.9999 according to yttm documentation recommendations
     if verbose: print('[Info] creating BPE dictionary for source language')  # noqa: E701
-    yttm.BPE.train(data=train_src, vocab_size=vocab_size, model=src_path, coverage=0.9999)
+    yttm.BPE.train(data=train_src, vocab_size=vocab_size, model=src_path, coverage=0.9999,
+                   pad_id=Constants.PAD, unk_id=Constants.UNK, bos_id=Constants.BOS, eos_id=Constants.EOS)
 
     if verbose: print('[Info] creating BPE dictionary for target language')  # noqa: E701
-    yttm.BPE.train(data=train_tgt, vocab_size=vocab_size, model=tgt_path, coverage=0.9999)
+    yttm.BPE.train(data=train_tgt, vocab_size=vocab_size, model=tgt_path, coverage=0.9999,
+                   pad_id=Constants.PAD, unk_id=Constants.UNK, bos_id=Constants.BOS, eos_id=Constants.EOS)
 
     src_bpe = yttm.BPE(model=src_path)
     tgt_bpe = yttm.BPE(model=tgt_path)
@@ -38,8 +41,10 @@ def main():
                         help='path to the directory where data will be saved')
 
     parser.add_argument('-vocab_size', default=32_000)
-    # parser.add_argument('-keep_case', action='store_true')
-    # parser.add_argument('-max_len', default=50)
+
+    # these two are proxied to dataset creation in train.py
+    parser.add_argument('-max_len', '--max_word_seq_len', type=int, default=50)
+    parser.add_argument('-keep_case', action='store_true')
 
     opt = parser.parse_args()
 

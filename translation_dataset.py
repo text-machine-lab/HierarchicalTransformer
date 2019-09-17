@@ -1,4 +1,7 @@
 import random
+import subprocess
+import linecache
+
 import numpy as np
 import torch
 import torch.utils.data
@@ -91,6 +94,49 @@ class TranslationDataset(torch.utils.data.Dataset):
         if self._tgt_insts:
             return self._src_insts[idx], self._tgt_insts[idx]
         return self._src_insts[idx]
+
+
+class RAFTranslationDataset(torch.utils.data.Dataset):
+    def __init__(self, src_path, tgt_path, src_tokenizer, tgt_tokenizer, max_len=None, warm_up=False):
+        '''Random access file translation dataset
+
+        reads file using python linecache
+
+        :param warm_up: warm up linecache
+        '''
+
+        self.src_path = src_path
+        self.tgt_path = tgt_path
+        self._len = int(subprocess.check_output("wc -l " + src_path, shell=True).split()[0])
+        self._check_data()
+
+        self.src_tokenizer = src_tokenizer
+        self.tgt_tokenizer = tgt_tokenizer
+
+        self.max_len = max_len
+
+        if warm_up: self[0]  # noqa: E701
+
+    def _check_data(self):
+        tgt_len = int(subprocess.check_output("wc -l " + self.tgt_path, shell=True).split()[0])
+        if tgt_len != self._len:
+            raise RuntimeError(f'different number of line in src ({self._len}) and tgt ({tgt_len}) files')
+
+    def __getitem__(self, idx):
+        src_line = linecache.getline(self.src_path, idx + 1)
+        tgt_line = linecache.getline(self.tgt_path, idx + 1)
+
+        src_tokens = self.src_tokenizer(src_line.strip())
+        tgt_tokens = self.tgt_tokenizer(tgt_line.strip())
+
+        if self.max_len is not None:
+            src_tokens = src_tokens[:self.max_len]
+            tgt_tokens = tgt_tokens[:self.max_len]
+
+        return src_tokens, tgt_tokens
+
+    def __len__(self):
+        return self._len
 
 
 class StreamingTranslationDataset(torch.utils.data.Dataset):
