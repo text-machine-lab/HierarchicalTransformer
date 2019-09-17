@@ -344,7 +344,7 @@ class Solver(object):
                 #self.writer.add_scalar('Training_loss_change', current_loss - prev_loss, tb_idx)
                 #prev_loss = current_loss
 
-                if batch_i % 10 == 0:
+                if batch_i % 50 == 0:
                     wandb.log({'hist_max_len': (input_histories != 0).float().sum(1).max()})
                     wandb.log({'grad_norm': norm})
                     wandb.log({'memory_used': get_gpu_memory_used()})

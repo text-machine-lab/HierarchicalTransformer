@@ -87,9 +87,10 @@ class MultiHeadAttention(nn.Module):
 class PositionwiseFeedForward(nn.Module):
     ''' A two-feed-forward-layer module '''
 
-    def __init__(self, d_in, d_hid, dropout=0.1):
+    def __init__(self, d_in, d_hid, dropout=0.1, k=1, stride=1, pad=0):
         super().__init__()
-        self.w_1 = nn.Conv1d(d_in, d_hid, 1) # position-wise
+        self.stride = stride
+        self.w_1 = nn.Conv1d(d_in, d_hid, k, stride=stride, padding=pad) # position-wise
         self.w_2 = nn.Conv1d(d_hid, d_in, 1) # position-wise
 
         # TODO remove these special initializations
@@ -108,5 +109,10 @@ class PositionwiseFeedForward(nn.Module):
         output = self.w_2(F.relu(self.w_1(output)))
         output = output.transpose(1, 2)
         output = self.dropout(output)
-        output = self.layer_norm(output + residual)
+
+        # if we reduce the number of tokens with stride > 1, then we cannot have residual connections
+        if self.stride == 1:
+            output = self.layer_norm(output + residual)
+        else:
+            output = self.layer_norm(output)
         return output
