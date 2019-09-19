@@ -102,6 +102,7 @@ class RAFTranslationDataset(torch.utils.data.Dataset):
 
         reads file using python linecache
 
+        :param tgt_path: path to target dataset; specify None if need translate mode
         :param warm_up: warm up linecache
         '''
 
@@ -118,11 +119,16 @@ class RAFTranslationDataset(torch.utils.data.Dataset):
         if warm_up: self[0]  # noqa: E701
 
     def _check_data(self):
+        if self.tgt_path is None:
+            print('[warning] _check_data is called without target dataset')
+            return
+
         tgt_len = int(subprocess.check_output("wc -l " + self.tgt_path, shell=True).split()[0])
         if tgt_len != self._len:
             raise RuntimeError(f'different number of line in src ({self._len}) and tgt ({tgt_len}) files')
 
     def __getitem__(self, idx):
+        # if tgt_path is None, linecache won't do anything
         src_line = linecache.getline(self.src_path, idx + 1)
         tgt_line = linecache.getline(self.tgt_path, idx + 1)
 

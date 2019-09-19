@@ -18,5 +18,3 @@ std = np.std(lens)
 
 print('# tokens mean: %s' % mean)
 print('# tokens std: %s' % std)
-
-

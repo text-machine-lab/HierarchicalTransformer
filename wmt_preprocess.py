@@ -29,6 +29,18 @@ def train_bpe(train_src, train_tgt, saveto, vocab_size, verbose=False):
     return src_bpe, tgt_bpe
 
 
+# def tokenize_file(feadfrom, saveto, max_len, bpe_obj, buffer_size=100):
+#     with open(feadfrom) as fin, open(saveto) as fout:
+#         buffer = []
+#         for i, line in enumerate(fin):
+#             if i % buffer_size == 0 and i > 0:
+#                 tokens_batch = bpe_obj.encode(
+#                     buffer, output_type=yttm.OutputType.SUBWORD, bos=True, eos=True)
+#                 )
+#                 for tokens in tokens_batch:
+#                     fout.write()
+
+
 def main():
     parser = argparse.ArgumentParser()
 

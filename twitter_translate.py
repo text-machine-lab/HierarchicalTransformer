@@ -45,8 +45,6 @@ def main():
     test_src_insts = convert_instance_to_idx_seq(
         test_src_word_insts, preprocess_data['dict']['src'])
 
-    # TODO: WMT-compatibility
-
     test_loader = torch.utils.data.DataLoader(
         TranslationDataset(
             src_word2idx=preprocess_data['dict']['src'],
