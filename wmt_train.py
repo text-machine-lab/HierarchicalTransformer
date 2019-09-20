@@ -2,7 +2,6 @@
 This script handling the training process for large translation dataset
 '''
 
-import datetime
 import argparse
 import math
 import time
@@ -21,10 +20,9 @@ import transformer.Constants as Constants
 from translation_dataset import TranslationDataset, RAFTranslationDataset, paired_collate_fn
 from transformer.Models import Transformer
 from transformer.Optim import ScheduledOptim
-from translator import Translator
 
 
-def preplexity(x):
+def perplexity(x):
     return math.exp(min(x, 100))
 
 
@@ -126,7 +124,7 @@ def eval_epoch(model, validation_data, device):
     # translator = Translator(None, model, beam_size=opt.beam_size, , n_best=1)
 
     # with torch.no_grad():
-    #     for batch in tqdm(validation_data, 
+    #     for batch in tqdm(validation_data,
     #                       desc='  - (BLEU) ',
     #                       leave=False):
     #         #
@@ -140,7 +138,7 @@ def eval_epoch(model, validation_data, device):
 
     print(f'  - (Validation) ppl: {round(perplexity(loss_per_word), 5)}, '
           f'accuracy: {round(accuracy, 3)} %, '
-          f'elapse: {round(time.time()-start)/60, 3)} min')
+          f'elapse: {round((time.time()-start)/60, 3)} min')
 
     model.train()
     return loss_per_word, accuracy
@@ -155,21 +153,24 @@ def train(model, training_data, validation_data, optimizer, device, opt):
 
     global_step = 0
     max_acc = 0
+    path = opt.save_model
 
     for epoch_i in range(opt.epoch):
         print(f'[ Epoch {epoch_i} ]')
         start = time.time()
 
         for batch_idx, batch in enumerate(tqdm(training_data, desc='  - (Training)   ', leave=False)):
+            global_step += 1
 
             # evaluate
-            if global_step > 0 and global_step % opt.eval_every == 0:
+            if global_step % opt.eval_every == 0:
+                print('    - [Info] in-epoch evaluation')
                 valid_loss, valid_acc = eval_epoch(model, validation_data, device)
 
                 # save
-                if valid_acc > max_acc or opt.mode == 'all':
-                    if opt.mode == 'all':
-                        path += f'_accuracy_{round(100*val_current_metric, 3)}'
+                if valid_acc > max_acc or opt.save_mode == 'all':
+                    if opt.save_mode == 'all':
+                        path += f'_accuracy_{round(100*valid_acc, 3)}'
                     path += '.chkpt'
                     checkpoint = {
                         'model': model.state_dict(),
@@ -190,7 +191,7 @@ def train(model, training_data, validation_data, optimizer, device, opt):
             pred = model(src_seq, src_pos, tgt_seq, tgt_pos)
 
             # backward
-            loss, n_correct = cal_performance(pred, gold, smoothing=smoothing)
+            loss, n_correct = cal_performance(pred, gold, smoothing=opt.label_smoothing)
             loss.backward()
 
             # update parameters
@@ -200,24 +201,26 @@ def train(model, training_data, validation_data, optimizer, device, opt):
             n_word = non_pad_mask.sum().item()
             wandb.log({
                 'training_loss': loss.item() / n_word,
+                'accuracy': n_correct / n_word
             })
 
-        train_loss, train_acc = train_epoch(
-            model, training_data, optimizer, device,
-            smoothing=opt.label_smoothing, eval_every=opt.eval_every
-        )
-
+        train_loss = loss.item()
+        train_acc = n_correct / n_word
         print(f'  - (Training)   ppl: {round(perplexity(train_loss), 5)}, '
               f'accuracy: {round(train_acc, 3)} %, '
-              f'elapse: {round(time.time()-start)/60, 3)} min')
+              f'elapse: {round((time.time()-start)/60, 3)} min')
 
-        # save model
+        # evaluate
+        valid_loss, valid_acc = eval_epoch(model, validation_data, device)
 
+        # save
         model_state_dict = model.state_dict()
         checkpoint = {
             'model': model_state_dict,
             'settings': opt,
-            'epoch': epoch_i}
+            'epoch': epoch_i,
+            'step': global_step
+        }
 
         if opt.save_model:
             if opt.save_mode == 'all':
@@ -254,7 +257,7 @@ def main():
     parser.add_argument('-epoch', type=int, default=10)
     parser.add_argument('-batch_size', type=int, default=64)
 
-    #parser.add_argument('-d_word_vec', type=int, default=512)
+    # parser.add_argument('-d_word_vec', type=int, default=512)
     parser.add_argument('-d_model', type=int, default=512)
     parser.add_argument('-d_inner_hid', type=int, default=2048)
     parser.add_argument('-d_k', type=int, default=64)
@@ -286,7 +289,7 @@ def main():
     opt.cuda = not opt.no_cuda
     opt.d_word_vec = opt.d_model
 
-    #========= Loading Dataset =========#
+    # ========= Loading Dataset ========= #
     if not opt.wmt:
         data = torch.load(opt.data)
         opt.max_token_seq_len = data['settings'].max_token_seq_len
@@ -309,7 +312,7 @@ def main():
             lambda x: src_bpe.encode([x], output_type=yttm.OutputType.ID, bos=True, eos=True)[0],
             lambda x: tgt_bpe.encode([x], output_type=yttm.OutputType.ID, bos=True, eos=True)[0],
             max_len=data_config['max_word_seq_len'],
-            warmup=True
+            warm_up=True
         )
 
         validation_dataset = RAFTranslationDataset(
@@ -318,21 +321,25 @@ def main():
             lambda x: src_bpe.encode([x], output_type=yttm.OutputType.ID, bos=True, eos=True)[0],
             lambda x: tgt_bpe.encode([x], output_type=yttm.OutputType.ID, bos=True, eos=True)[0],
             max_len=data_config['max_word_seq_len'],
-            warmup=True
+            warm_up=True
         )
 
         # TODO: fix multiple workers
-        training_data = torch.utils.data.DataLoader(training_dataset,
-            num_workers=2, batch_size=opt.batch_size, collate_fn=paired_collate_fn, shuffle=True)
+        training_data = torch.utils.data.DataLoader(
+            training_dataset,
+            num_workers=2, batch_size=opt.batch_size, collate_fn=paired_collate_fn, shuffle=True
+        )
 
-        validation_data = torch.utils.data.DataLoader(validation_dataset,
-            num_workers=2, batch_size=opt.batch_size, collate_fn=paired_collate_fn, shuffle=False)
+        validation_data = torch.utils.data.DataLoader(
+            validation_dataset,
+            num_workers=2, batch_size=opt.batch_size, collate_fn=paired_collate_fn, shuffle=False
+        )
 
         opt.src_vocab_size = src_bpe.vocab_size()
         opt.tgt_vocab_size = tgt_bpe.vocab_size()
         opt.max_token_seq_len = data_config['max_word_seq_len']
 
-    #========= Preparing Model =========#
+    # ========= Preparing Model ========= #
     if opt.embs_share_weight and not opt.wmt:
         assert training_data.dataset.src_word2idx == training_data.dataset.tgt_word2idx, \
             'The src/tgt word2idx table are different but asked to share word embedding.'
