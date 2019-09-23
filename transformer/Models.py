@@ -22,6 +22,14 @@ def batched_index_select(input, dim, index):
     index = index.view(views).expand(expanse)
     return torch.gather(input, dim, index)
 
+def get_attn_mask(query_non_pad, key_non_pad):
+    '''This calculates the attention mask from purely the non-pad representations'''
+    len_q = query_non_pad.size(1)
+    key_pad = 1 - key_non_pad
+    padding_mask = key_pad.squeeze(2).byte()
+    padding_mask = padding_mask.unsqueeze(1).expand(-1, len_q, -1)  # b x lq x lk
+    return padding_mask
+
 def get_non_pad_mask(seq):
     assert seq.dim() == 2
     return seq.ne(Constants.PAD).type(torch.float).unsqueeze(-1)
@@ -159,11 +167,15 @@ class UNetEncoder(nn.Module):
         depth = n_layers // 2 - 1
 
         # each layer increases in size by the sqrt of 2 to keep computation relatively constant
-        multiples = [sqrt(2)** i for i in range(depth + 1)]
+        # TODO add back sqrt(2) layer sizes
+        multiples = [sqrt(2) ** i for i in range(depth + 1)]
         layer_sizes = [round(d_model * multiples[i]) for i in range(depth + 1)]  # [d_model for _ in range(depth+1)]  #
         inner_sizes = [round(d_inner * multiples[i]) for i in range(depth + 1)]
         d_k_sizes = [round(d_k * multiples[i+1]) for i in range(depth)]
         d_v_sizes = [round(d_v * multiples[i+1]) for i in range(depth)]
+
+        # all down layer sizes followed by up layer sizes
+        self.d_enc = layer_sizes + layer_sizes[1::-1] + [d_model]
 
         # layers going down to abstract representation
         #
@@ -185,6 +197,8 @@ class UNetEncoder(nn.Module):
 
     def forward(self, src_seq, src_pos, src_segs=None, return_attns=False):
 
+        # TODO modify this to return a list of hidden layers
+
         # -- Prepare masks
         slf_attn_mask = get_attn_key_pad_mask(seq_k=src_seq, seq_q=src_seq)  # b x l
         non_pad_mask = get_non_pad_mask(src_seq)  # b x lq x lk
@@ -198,6 +212,9 @@ class UNetEncoder(nn.Module):
 
         # start with bit representation of padding tokens (non_pad_mask)
 
+        all_layer_outputs = []
+        all_non_pads = []
+
         slf_attn_list = []
         down_outputs = []
 
@@ -209,6 +226,8 @@ class UNetEncoder(nn.Module):
             slf_attn_mask=slf_attn_mask)
 
         first_output = enc_output
+        all_layer_outputs.append(enc_output)
+        all_non_pads.append(non_pad_mask)
 
         if return_attns:
             slf_attn_list.append(enc_slf_attn)
@@ -221,17 +240,21 @@ class UNetEncoder(nn.Module):
 
             prev_layer_non_pad = layer_non_pad  # b x lq
             layer_non_pad = self.maxpool1d(layer_non_pad.transpose(1, 2)).squeeze(1).unsqueeze(2)
+            all_non_pads.append(layer_non_pad)
 
             # compute slf_attn_mask from pad specifications for current and previous layer
             # TODO changing pad mask to go from pooled dim to pooled dim
-            len_q = layer_non_pad.size(1)
-            padding_mask = (1 - layer_non_pad).squeeze(2).byte()
-            padding_mask = padding_mask.unsqueeze(1).expand(-1, len_q, -1)  # b x lq x lk
+            # len_q = layer_non_pad.size(1)
+            # padding_mask = (1 - layer_non_pad).squeeze(2).byte()
+            # padding_mask = padding_mask.unsqueeze(1).expand(-1, len_q, -1)  # b x lq x lk
+            padding_mask = get_attn_mask(layer_non_pad, layer_non_pad)
 
             enc_output, enc_slf_attn = layer(
                 enc_output,
                 non_pad_mask=layer_non_pad,
                 slf_attn_mask=padding_mask)
+
+            all_layer_outputs.append(enc_output)
 
             # compute pad specification for next layer from maxpool 1
 
@@ -260,6 +283,8 @@ class UNetEncoder(nn.Module):
             # reverse ordering, since we are upsampling now instead of down
             layer_non_pad, prev_layer_non_pad = pair
 
+            all_non_pads.append(layer_non_pad)
+
             # compute slf_attn_mask from pad specifications for current and previous layer
             len_q = layer_non_pad.size(1)
             #TODO removed prev_
@@ -274,22 +299,35 @@ class UNetEncoder(nn.Module):
                 non_pad_mask=layer_non_pad,
                 slf_attn_mask=padding_mask)
 
+            all_layer_outputs.append(enc_output)
+
             if return_attns:
                 slf_attn_list += [enc_slf_attn]
 
         ######## OUTPUT LAYER #############
+
+        all_non_pads.append(non_pad_mask)
 
         enc_output, enc_slf_attn = self.out_layer(
             enc_output + first_output,  # HERE WE ADD FIRST DOWN LAYER OUTPUT FOR FINAL PREDICTION
             non_pad_mask=non_pad_mask,
             slf_attn_mask=slf_attn_mask)
 
+        all_layer_outputs.append(enc_output)
+
         if return_attns:
             slf_attn_list.append(enc_slf_attn)
 
         if return_attns:
             return enc_output, slf_attn_list
+
+        # TODO now returning all layers outputs, not just the last layer
+        # return enc_output,
+        all_encoder_layers = list(zip(all_layer_outputs, all_non_pads))
+
+        # TODO allow attention on individual layers
         return enc_output,
+        #return all_encoder_layers,
 
 
 class Decoder(nn.Module):
@@ -299,24 +337,29 @@ class Decoder(nn.Module):
             self,
             n_tgt_vocab, len_max_seq, d_word_vec,
             n_layers, n_head, d_k, d_v,
-            d_model, d_inner, dropout=0.1):
+            d_model, d_inner, dropout=0.1, d_enc=None):
 
         super().__init__()
         n_position = len_max_seq + 1
+        # if none, set encoder size equal to decoder size
+        d_enc = d_model if d_enc is None else d_enc
+        # if encoder size is an int, expand to a list of ints to initialize each layer respectively
+        self.d_enc = [d_enc] * n_layers if isinstance(d_enc, int) else d_enc
 
-        self.tgt_word_emb = nn.Embedding(
-            n_tgt_vocab, d_word_vec, padding_idx=Constants.PAD)
+        self.tgt_word_emb = nn.Embedding(n_tgt_vocab, d_word_vec, padding_idx=Constants.PAD)
 
         self.position_enc = nn.Embedding.from_pretrained(
             get_sinusoid_encoding_table(n_position, d_word_vec, padding_idx=0),
             freeze=True)
 
+        # TODO here we allow attention over different encoder sizes
         self.layer_stack = nn.ModuleList([
-            DecoderLayer(d_model, d_inner, n_head, d_k, d_v, dropout=dropout)
-            for _ in range(n_layers)])
+            DecoderLayer(d_model, d_inner, n_head, d_k, d_v, dropout=dropout, d_enc=self.d_enc[i])
+            for i in range(n_layers)])
 
     def forward(self, tgt_seq, tgt_pos, src_seq, enc_output, return_attns=False):
 
+        # TODO modify this so that it can take enc_output as a list of size n_layers
         dec_slf_attn_list, dec_enc_attn_list = [], []
 
         # -- Prepare masks
@@ -332,9 +375,20 @@ class Decoder(nn.Module):
         # if index out of range error, probably dataset has sequences > max length
         dec_output = self.tgt_word_emb(tgt_seq) + self.position_enc(tgt_pos)
 
-        for dec_layer in self.layer_stack:
+        for i, dec_layer in enumerate(self.layer_stack):
+            # here we allow attention over each corresponding encoder layer, instead of just the last
+            if isinstance(enc_output, list):
+                enc_repr, enc_non_pad = enc_output[i]
+
+                if enc_repr.shape[-1] != self.d_enc[i]:
+                    import pdb; pdb.set_trace()
+
+                dec_enc_attn_mask = get_attn_mask(non_pad_mask, enc_non_pad)
+            else:
+                enc_repr = enc_output
+
             dec_output, dec_slf_attn, dec_enc_attn = dec_layer(
-                dec_output, enc_output,
+                dec_output, enc_repr,
                 non_pad_mask=non_pad_mask,
                 slf_attn_mask=slf_attn_mask,
                 dec_enc_attn_mask=dec_enc_attn_mask)
@@ -496,15 +550,24 @@ class MultiModel(nn.Module):
         self.len_max_seq = len_max_seq
         d_k = d_v = d_model // n_head
         # this is the major modification of the project
-        encoder_type = Encoder if not encoder == 'unet' else UNetEncoder
+        d_enc = d_model
 
-        if encoder == 'transformer' or encoder == 'unet':
-
-            self.encoder = encoder_type(
+        if encoder == 'transformer':
+            self.encoder = Encoder(
                 n_src_vocab=n_src_vocab, len_max_seq=len_max_seq,
                 d_word_vec=d_word_vec, d_model=d_model, d_inner=d_inner,
                 n_layers=n_layers, n_head=n_head, d_k=d_k, d_v=d_v,
                 dropout=dropout)
+
+        if encoder == 'unet':
+            self.encoder = UNetEncoder(
+                n_src_vocab=n_src_vocab, len_max_seq=len_max_seq,
+                d_word_vec=d_word_vec, d_model=d_model, d_inner=d_inner,
+                n_layers=n_layers, n_head=n_head, d_k=d_k, d_v=d_v,
+                dropout=dropout)
+
+            #d_enc = self.encoder.d_enc  # custom layer sizes
+
         elif encoder == 'gru':
             self.encoder = GRUEncoder(n_src_vocab, d_model)
         else:
@@ -515,7 +578,7 @@ class MultiModel(nn.Module):
                 n_tgt_vocab=n_tgt_vocab, len_max_seq=len_max_seq,
                 d_word_vec=d_word_vec, d_model=d_model, d_inner=d_inner,
                 n_layers=n_layers, n_head=n_head, d_k=d_k, d_v=d_v,
-                dropout=dropout)
+                dropout=dropout, d_enc=d_enc)
         elif decoder == 'gru':
             self.decoder = MultiHeadAttentionGRUDecoder(n_tgt_vocab, d_model, d_k, d_v, n_head, dropout=dropout)
         else:

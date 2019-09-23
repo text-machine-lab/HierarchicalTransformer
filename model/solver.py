@@ -304,7 +304,7 @@ class Solver(object):
 
                     # MAKE SURE THAT EVALUATION FUNCTION MATCHES THESE RESTRICTIONS ON INPUT SIZE!!!
 
-                    wandb.log({'hist_max_len': (input_histories != 0).float().sum(1).max()})
+
 
                     # TODO right align input histories and prune from left
 
@@ -326,19 +326,13 @@ class Solver(object):
                     target_sentences,
                     target_sentence_length)
 
-                wandb.log({'memory_used': get_gpu_memory_used()})
-
                 # Back-propagation
                 batch_loss.backward()
-
-                if isinstance(self.model, MULTI):
-                    wandb.log({'word_grad': self.model.model.encoder.src_word_emb.weight.grad.abs().mean()})
 
                 # Gradient cliping
                 norm = torch.nn.utils.clip_grad_norm_(self.model.parameters(), self.config.clip)
 
                 #self.writer.add_scalar('grad_norm', norm, tb_idx)
-                wandb.log({'grad_norm': norm})
 
                 # Run optimizer
                 self.optimizer.step()
@@ -352,8 +346,12 @@ class Solver(object):
                 #self.writer.add_scalar('training_loss', current_loss, tb_idx)
                 #self.writer.add_scalar('Training_loss_change', current_loss - prev_loss, tb_idx)
                 #prev_loss = current_loss
-
-                wandb.log({'train_loss': current_loss})
+                if batch_i % 100 == 0:
+                    if isinstance(self.model, MULTI):
+                        wandb.log({'word_grad': self.model.model.encoder.src_word_emb.weight.grad.abs().mean()})
+                    wandb.log({'grad_norm': norm})
+                    wandb.log({'hist_max_len': (input_histories != 0).float().sum(1).max()})
+                    wandb.log({'train_loss': current_loss})
 
                 # if batch_i % self.config.print_every == 0:
                 #     tqdm.write(
