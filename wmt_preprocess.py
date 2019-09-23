@@ -57,16 +57,25 @@ def main():
     # these two are proxied to dataset creation in train.py
     parser.add_argument('-max_len', '--max_word_seq_len', type=int, default=50)
     parser.add_argument('-keep_case', action='store_true')
+    parser.add_argument('-bpe', action='store_true', help='learn BPE tokenization')
 
     opt = parser.parse_args()
 
     # script starts here
-    src_bpe, tgt_bpe = train_bpe(
-        opt.train_src, opt.train_tgt, opt.saveto, opt.vocab_size, verbose=VERBOSE)
+    if not os.path.exists(opt.saveto):
+        print(f'[Info] creating directory {opt.saveto}')
+        os.mkdir(opt.saveto)
 
-    config = vars(opt)
-    config['src_bpe'] = os.path.join(config['saveto'], 'src.bpe')
-    config['tgt_bpe'] = os.path.join(config['saveto'], 'tgt.bpe')
+    if opt.bpe:
+        src_bpe, tgt_bpe = train_bpe(
+            opt.train_src, opt.train_tgt, opt.saveto, opt.vocab_size, verbose=VERBOSE)
+
+        config = vars(opt)
+        config['src_bpe'] = os.path.join(config['saveto'], 'src.bpe')
+        config['tgt_bpe'] = os.path.join(config['saveto'], 'tgt.bpe')
+    else:
+        config['src_bpe'] = config['tgt_bpe'] = None
+        config['space_tokenizer'] = True
 
     config_path = os.path.join(opt.saveto, 'config.json')
     with open(config_path, 'w') as f:

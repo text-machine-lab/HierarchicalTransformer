@@ -97,11 +97,14 @@ class TranslationDataset(torch.utils.data.Dataset):
 
 
 class RAFTranslationDataset(torch.utils.data.Dataset):
-    def __init__(self, src_path, tgt_path, src_tokenizer, tgt_tokenizer, max_len=None, warm_up=False):
+    def __init__(self, src_path, tgt_path, src_tokenizer, tgt_tokenizer,
+                 max_len=None, warm_up=False, tgt_detokenizer=None):
         '''Random access file translation dataset
 
         reads file using python linecache
 
+        :param *_tokenizer: function: str -> list[int]
+        :param tgt_detokenizer: function: list[int] -> str, used to decode translated sentence
         :param tgt_path: path to target dataset; specify None if need translate mode
         :param warm_up: warm up linecache
         '''
@@ -113,6 +116,7 @@ class RAFTranslationDataset(torch.utils.data.Dataset):
 
         self.src_tokenizer = src_tokenizer
         self.tgt_tokenizer = tgt_tokenizer
+        self.tgt_detokenizer = tgt_detokenizer
 
         self.max_len = max_len
 

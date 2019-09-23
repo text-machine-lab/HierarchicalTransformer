@@ -13,42 +13,26 @@ import torch.nn.functional as F
 import torch.optim as optim
 import torch.utils.data
 import youtokentome as yttm
+from sacrebleu import corpus_bleu
 
 from tqdm import tqdm
 
 import transformer.Constants as Constants
-from translation_dataset import TranslationDataset, RAFTranslationDataset, paired_collate_fn
+from translation_dataset import RAFTranslationDataset, paired_collate_fn
 from transformer.Models import Transformer
 from transformer.Optim import ScheduledOptim
+from transformer.Translator import Translator
+from transformer.Utils import WrappedDataParallel
+
+SPECIAL_TOKENS = {Constants.PAD, Constants.UNK, Constants.BOS, Constants.EOS}
+
+
+def detorch(x):
+    return x.detach().cpu().numpy()
 
 
 def perplexity(x):
     return math.exp(min(x, 100))
-
-
-def prepare_dataloaders(data, opt):
-    # ========= Preparing DataLoader =========#
-    train_loader = torch.utils.data.DataLoader(
-        TranslationDataset(
-            src_word2idx=data['dict']['src'],
-            tgt_word2idx=data['dict']['tgt'],
-            src_insts=data['train']['src'],
-            tgt_insts=data['train']['tgt']),
-        num_workers=2,
-        batch_size=opt.batch_size,
-        collate_fn=paired_collate_fn,
-        shuffle=True)
-
-    valid_loader = torch.utils.data.DataLoader(
-        TranslationDataset(
-            src_word2idx=data['dict']['src'],
-            tgt_word2idx=data['dict']['tgt'],
-            src_insts=data['valid']['src'],
-            tgt_insts=data['valid']['tgt']),
-        num_workers=2,
-        batch_size=opt.batch_size,
-        collate_fn=paired_collate_fn)
-    return train_loader, valid_loader
 
 
 def cal_performance(pred, gold, smoothing=False):
@@ -83,15 +67,55 @@ def cal_loss(pred, gold, smoothing):
         loss = -(one_hot * log_prb).sum(dim=1)
         loss = loss.masked_select(non_pad_mask).sum()  # average later
     else:
-        # raise NotImplementedError('loss withoug smoothing is not masked')
         loss = F.cross_entropy(pred, gold, ignore_index=Constants.PAD, reduction='sum')
 
     return loss
 
 
-def eval_epoch(model, validation_data, device):
-    ''' Epoch operation in evaluation phase '''
+def compute_bleu(model, dataloader, beam_size, max_seq_len):
+    if dataloader.dataset.tgt_detokenizer is None:
+        raise RuntimeError('tgt_detokenizer should be specified in the dataset '
+                           'in order to compute BLEU score')
 
+    detokenize = dataloader.dataset.tgt_detokenizer
+
+    pred_translations = []
+    true_translations = []
+
+    translator = Translator(None, model, beam_size=beam_size, max_seq_len=max_seq_len, n_best=1)
+    for src_seq, src_pos, tgt_seq, tgt_pos in tqdm(
+            dataloader, mininterval=2, desc='  - (Translating)', leave=False):
+        all_hyp, all_scores = translator.translate_batch(src_seq, src_pos)
+
+        for pred_sentence_hyp, true_translation in zip(all_hyp, tgt_seq):
+            # iteration over a batch dimension
+
+            translation_ids = pred_sentence_hyp[0]  # select the first hypothesis
+            true_translation_ids = detorch(true_translation).tolist()
+
+            translation_ids = [t for t in translation_ids if t not in SPECIAL_TOKENS]
+            true_translation_ids = [t for t in true_translation_ids if t not in SPECIAL_TOKENS]
+
+            translation_str = true_translation_str = ''
+            if translation_ids:
+                translation_str = detokenize(translation_ids)
+            if true_translation_ids:
+                true_translation_str = detokenize(true_translation_ids)
+
+            # standard tokenization for WMT dataset BLEU computation
+            pred_translations.append(translation_str)
+            true_translations.append(true_translation_str)
+
+    bleu_obj = corpus_bleu(pred_translations, [true_translations])
+    return bleu_obj.score
+
+
+def eval_epoch(model, validation_data, device, beam_size=None, max_seq_len=None):
+    ''' Epoch operation in evaluation phase
+
+    :param beam_size: int, needed for BLEU score computation
+    :param max_seq_len: int, needed for BLEU score computation
+    '''
     start = time.time()
     model.eval()
 
@@ -121,14 +145,9 @@ def eval_epoch(model, validation_data, device):
             n_word_total += n_word
             n_word_correct += n_correct
 
-    # translator = Translator(None, model, beam_size=opt.beam_size, , n_best=1)
-
-    # with torch.no_grad():
-    #     for batch in tqdm(validation_data,
-    #                       desc='  - (BLEU) ',
-    #                       leave=False):
-    #         #
-    #         ...
+        if beam_size is not None:
+            valid_bleu = compute_bleu(model, validation_data, beam_size, max_seq_len)
+            wandb.log({'val_bleu': valid_bleu})
 
     loss_per_word = total_loss/n_word_total
 
@@ -159,13 +178,14 @@ def train(model, training_data, validation_data, optimizer, device, opt):
         print(f'[ Epoch {epoch_i} ]')
         start = time.time()
 
-        for batch_idx, batch in enumerate(tqdm(training_data, desc='  - (Training)   ', leave=False)):
+        for batch_idx, batch in enumerate(tqdm(training_data, desc='  - (Training)   ', leave=True)):
             global_step += 1
 
             # evaluate
             if global_step % opt.eval_every == 0:
                 print('    - [Info] in-epoch evaluation')
-                valid_loss, valid_acc = eval_epoch(model, validation_data, device)
+                valid_loss, valid_acc = eval_epoch(model, validation_data, device,
+                                                   opt.beam_size, opt.max_token_seq_len)
 
                 # save
                 if valid_acc > max_acc or opt.save_mode == 'all':
@@ -180,6 +200,7 @@ def train(model, training_data, validation_data, optimizer, device, opt):
                     }
                     torch.save(checkpoint, path)
                     print(f'    - [Info] The checkpoint file has been saved as {path}.')
+            # end of evaluate
 
             # prepare data
             # pos - position, it is added in collate_fn
@@ -210,28 +231,25 @@ def train(model, training_data, validation_data, optimizer, device, opt):
               f'accuracy: {round(train_acc, 3)} %, '
               f'elapse: {round((time.time()-start)/60, 3)} min')
 
-        # evaluate
-        valid_loss, valid_acc = eval_epoch(model, validation_data, device)
+        # evaluate at the end of epoch
+        valid_loss, valid_acc = eval_epoch(model, validation_data, device,
+                                           opt.beam_size, opt.max_token_seq_len)
 
         # save
-        model_state_dict = model.state_dict()
-        checkpoint = {
-            'model': model_state_dict,
-            'settings': opt,
-            'epoch': epoch_i,
-            'step': global_step
-        }
-
-        if opt.save_model:
+        if valid_acc > max_acc or opt.save_mode == 'all':
             if opt.save_mode == 'all':
-                model_name = opt.save_model + '_accuracy_{accu:3.3f}.chkpt'.format(accu=100*valid_acc)
-                torch.save(checkpoint, model_name)
-            elif opt.save_mode == 'best':
-                model_name = opt.save_model + '.chkpt'
-                if valid_acc >= max_acc:
-                    torch.save(checkpoint, model_name)
-                    print('    - [Info] The checkpoint file has been updated.')
+                path += f'_accuracy_{round(100*valid_acc, 3)}'
+            path += '.chkpt'
+            checkpoint = {
+                'model': model.state_dict(),
+                'settings': opt,
+                'epoch': epoch_i,
+                'step': global_step
+            }
+            torch.save(checkpoint, path)
+            print(f'    - [Info] The checkpoint file has been saved as {path}.')
 
+        # update best val_acc
         if valid_acc > max_acc:
             max_acc = valid_acc
 
@@ -269,6 +287,8 @@ def main():
     parser.add_argument('-lr_factor', type=float, default=1.0)
     parser.add_argument('-eval_every', type=int, default=10_000,
                         help='validate (and save model) every n batches')
+    parser.add_argument('-beam_size', type=int, default=3,
+                        help='beam size for validation BLEU score')
 
     parser.add_argument('-dropout', type=float, default=0.1)
     parser.add_argument('-embs_share_weight', action='store_true')
@@ -282,62 +302,50 @@ def main():
     parser.add_argument('-label_smoothing', action='store_true')
     parser.add_argument('-unet', action='store_true')
 
-    parser.add_argument('-wmt', action='store_true',
-                        help=('preprocess data on the fly, consume much less memory; '
-                              'in this case -data is the path to config.json from wmt_preprocess'))
     opt = parser.parse_args()
     opt.cuda = not opt.no_cuda
     opt.d_word_vec = opt.d_model
 
     # ========= Loading Dataset ========= #
-    if not opt.wmt:
-        data = torch.load(opt.data)
-        opt.max_token_seq_len = data['settings'].max_token_seq_len
+    with open(opt.data) as f:
+        data_config = json.load(f)
 
-        training_data, validation_data = prepare_dataloaders(data, opt)
+    src_bpe = yttm.BPE(model=data_config['src_bpe'])
+    tgt_bpe = yttm.BPE(model=data_config['tgt_bpe'])
 
-        opt.src_vocab_size = training_data.dataset.src_vocab_size
-        opt.tgt_vocab_size = training_data.dataset.tgt_vocab_size
+    training_dataset = RAFTranslationDataset(
+        data_config['train_src'],
+        data_config['train_tgt'],
+        lambda x: src_bpe.encode([x], output_type=yttm.OutputType.ID, bos=True, eos=True)[0],
+        lambda x: tgt_bpe.encode([x], output_type=yttm.OutputType.ID, bos=True, eos=True)[0],
+        max_len=data_config['max_word_seq_len'],
+        warm_up=True
+    )
 
-    else:
-        with open(opt.data) as f:
-            data_config = json.load(f)
+    validation_dataset = RAFTranslationDataset(
+        data_config['valid_src'],
+        data_config['valid_tgt'],
+        lambda x: src_bpe.encode([x], output_type=yttm.OutputType.ID, bos=True, eos=True)[0],
+        lambda x: tgt_bpe.encode([x], output_type=yttm.OutputType.ID, bos=True, eos=True)[0],
+        max_len=data_config['max_word_seq_len'],
+        warm_up=True,
+        tgt_detokenizer=lambda x: tgt_bpe.decode(x)[0]
+    )
 
-        src_bpe = yttm.BPE(model=data_config['src_bpe'])
-        tgt_bpe = yttm.BPE(model=data_config['tgt_bpe'])
+    training_data = torch.utils.data.DataLoader(
+        training_dataset,
+        num_workers=2, batch_size=opt.batch_size, collate_fn=paired_collate_fn, shuffle=True
+    )
 
-        training_dataset = RAFTranslationDataset(
-            data_config['train_src'],
-            data_config['train_tgt'],
-            lambda x: src_bpe.encode([x], output_type=yttm.OutputType.ID, bos=True, eos=True)[0],
-            lambda x: tgt_bpe.encode([x], output_type=yttm.OutputType.ID, bos=True, eos=True)[0],
-            max_len=data_config['max_word_seq_len'],
-            warm_up=True
-        )
+    validation_data = torch.utils.data.DataLoader(
+        validation_dataset,
+        num_workers=2, batch_size=opt.batch_size, collate_fn=paired_collate_fn, shuffle=False
+    )
 
-        validation_dataset = RAFTranslationDataset(
-            data_config['valid_src'],
-            data_config['valid_tgt'],
-            lambda x: src_bpe.encode([x], output_type=yttm.OutputType.ID, bos=True, eos=True)[0],
-            lambda x: tgt_bpe.encode([x], output_type=yttm.OutputType.ID, bos=True, eos=True)[0],
-            max_len=data_config['max_word_seq_len'],
-            warm_up=True
-        )
-
-        # TODO: fix multiple workers
-        training_data = torch.utils.data.DataLoader(
-            training_dataset,
-            num_workers=2, batch_size=opt.batch_size, collate_fn=paired_collate_fn, shuffle=True
-        )
-
-        validation_data = torch.utils.data.DataLoader(
-            validation_dataset,
-            num_workers=2, batch_size=opt.batch_size, collate_fn=paired_collate_fn, shuffle=False
-        )
-
-        opt.src_vocab_size = src_bpe.vocab_size()
-        opt.tgt_vocab_size = tgt_bpe.vocab_size()
-        opt.max_token_seq_len = data_config['max_word_seq_len']
+    # additional opt fields for coppatibility with original training script
+    opt.src_vocab_size = src_bpe.vocab_size()
+    opt.tgt_vocab_size = tgt_bpe.vocab_size()
+    opt.max_token_seq_len = data_config['max_word_seq_len']
 
     # ========= Preparing Model ========= #
     if opt.embs_share_weight and not opt.wmt:
@@ -347,7 +355,7 @@ def main():
     print(opt)
 
     device = torch.device('cuda' if opt.cuda else 'cpu')
-    transformer = Transformer(
+    model = Transformer(
         opt.src_vocab_size,
         opt.tgt_vocab_size,
         opt.max_token_seq_len,
@@ -361,18 +369,21 @@ def main():
         dropout=opt.dropout,
         unet=opt.unet).to(device)
 
+    if torch.cuda.device_count() > 1:
+        print(f'[Info] using {torch.cuda.device_count()} GPUs')
+        model = WrappedDataParallel(model)
+
     optimizer = ScheduledOptim(
         optim.Adam(
-            filter(lambda x: x.requires_grad, transformer.parameters()),
+            filter(lambda x: x.requires_grad, model.parameters()),
             betas=(0.9, 0.98), eps=1e-09),
         opt.d_model, opt.n_warmup_steps, lr_factor=opt.lr_factor)
 
     wandb.init(project='hierarchical_transformer', config=opt, notes='Debug run on small dataset')
-    wandb.watch(transformer)
+    wandb.watch(model)
 
-    train(transformer, training_data, validation_data, optimizer, device, opt)
+    train(model, training_data, validation_data, optimizer, device, opt)
 
 
 if __name__ == '__main__':
-
     main()

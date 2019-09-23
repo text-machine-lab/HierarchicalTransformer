@@ -7,6 +7,8 @@ import torch.nn.functional as F
 from transformer.Models import Transformer
 from transformer.Beam import Beam
 import transformer.Constants as Constants
+from transformer.Utils import WrappedDataParallel
+
 
 class Translator(object):
     ''' Load with trained model and handle the beam search '''
@@ -49,6 +51,9 @@ class Translator(object):
                 n_layers=model_opt.n_layers,
                 n_head=model_opt.n_head,
                 dropout=model_opt.dropout)
+
+            if torch.cuda.device_count() > 1:
+                model = WrappedDataParallel(model)
 
             model.load_state_dict(checkpoint['model'])
             print('[Info] Trained model state loaded.')
