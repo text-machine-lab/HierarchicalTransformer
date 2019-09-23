@@ -42,18 +42,24 @@ class UNetEncoderLayer(nn.Module):
 
         self.skip_connect = skip_connect
 
+        # TODO add depthwise-separable convolutions
+
+        self.maxpool = None
         self.type = type_
         if type_ == 'down':
             # half size of output
-            self.conv = nn.Conv1d(d_in, d_out, kernel_size=3, stride=2, padding=1)
+            self.conv = nn.Conv1d(d_in, d_in, kernel_size=3, padding=1, groups=d_in)
+            self.maxpool = nn.MaxPool1d(kernel_size=3, stride=2, padding=1)
         elif type_ == 'same':
             # keep size of output the same
-            self.conv = nn.Conv1d(d_in, d_out, kernel_size=3, padding=1)
+            self.conv = nn.Conv1d(d_in, d_in, kernel_size=3, padding=1, groups=d_in)
         elif type_ == 'up':
             # double size of output
-            self.conv = nn.ConvTranspose1d(d_in, d_out, kernel_size=3, stride=2, padding=1)
+            self.conv = nn.ConvTranspose1d(d_in, d_in, kernel_size=3, stride=2, padding=1, groups=d_in)
         else:
             raise RuntimeError('Did not specify appropriate convolution type')
+
+        self.conv_out = nn.Linear(d_in, d_out)
 
     def forward(self, enc_input, non_pad_mask=None, slf_attn_mask=None):
 
@@ -67,6 +73,14 @@ class UNetEncoderLayer(nn.Module):
                 (non_pad_mask.shape[0], conv_input.shape[2], non_pad_mask.shape[1])
 
             conv_output_t = self.conv(conv_input, output_size=output_size)
+
+        conv_output_t = self.conv_out(conv_output_t.transpose(1,2)).transpose(1,2)
+
+        # if this is a down layer, we use maxpool similar to the true U-Net
+        if self.maxpool is not None:
+            # in: (batch_size, emb_size, n_steps)
+            # out: (batch_size, emb_size, n_steps//2)
+            conv_output_t = self.maxpool(conv_output_t)
 
         conv_output = conv_output_t.transpose(1, 2)  # (batch_size, n_steps, emb_size)
 
@@ -92,10 +106,11 @@ class UNetEncoderLayer(nn.Module):
 class DecoderLayer(nn.Module):
     ''' Compose with three layers '''
 
-    def __init__(self, d_model, d_inner, n_head, d_k, d_v, dropout=0.1):
+    def __init__(self, d_model, d_inner, n_head, d_k, d_v, dropout=0.1, d_enc=None):
         super(DecoderLayer, self).__init__()
+        d_enc = d_model if d_enc is None else d_enc
         self.slf_attn = MultiHeadAttention(n_head, d_model, d_k, d_v, dropout=dropout)
-        self.enc_attn = MultiHeadAttention(n_head, d_model, d_k, d_v, dropout=dropout)
+        self.enc_attn = MultiHeadAttention(n_head, d_model, d_k, d_v, dropout=dropout, d_in=d_enc)
         self.pos_ffn = PositionwiseFeedForward(d_model, d_inner, dropout=dropout)
 
     def forward(self, dec_input, enc_output, non_pad_mask=None, slf_attn_mask=None, dec_enc_attn_mask=None):
