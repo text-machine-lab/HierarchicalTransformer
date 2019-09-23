@@ -160,7 +160,7 @@ def eval_epoch(model, validation_data, device, beam_size=None, max_seq_len=None)
           f'elapse: {round((time.time()-start)/60, 3)} min')
 
     model.train()
-    return loss_per_word, accuracy
+    return loss_per_word, accuracy, valid_bleu
 
 
 def train(model, training_data, validation_data, optimizer, device, opt):
@@ -171,7 +171,7 @@ def train(model, training_data, validation_data, optimizer, device, opt):
     '''
 
     global_step = 0
-    max_acc = 0
+    max_bleu = 0
     path = opt.save_model
 
     for epoch_i in range(opt.epoch):
@@ -184,11 +184,12 @@ def train(model, training_data, validation_data, optimizer, device, opt):
             # evaluate
             if global_step % opt.eval_every == 0:
                 print('    - [Info] in-epoch evaluation')
-                valid_loss, valid_acc = eval_epoch(model, validation_data, device,
-                                                   opt.beam_size, opt.max_token_seq_len)
+                valid_loss, valid_acc, valid_bleu = eval_epoch(
+                    model, validation_data, device, opt.beam_size, opt.max_token_seq_len
+                )
 
                 # save
-                if valid_acc > max_acc or opt.save_mode == 'all':
+                if valid_bleu > max_bleu or opt.save_mode == 'all':
                     if opt.save_mode == 'all':
                         path += f'_accuracy_{round(100*valid_acc, 3)}'
                     path += '.chkpt'
@@ -232,11 +233,12 @@ def train(model, training_data, validation_data, optimizer, device, opt):
               f'elapse: {round((time.time()-start)/60, 3)} min')
 
         # evaluate at the end of epoch
-        valid_loss, valid_acc = eval_epoch(model, validation_data, device,
-                                           opt.beam_size, opt.max_token_seq_len)
+        valid_loss, valid_acc, valid_bleu = eval_epoch(
+            model, validation_data, device, opt.beam_size, opt.max_token_seq_len
+        )
 
         # save
-        if valid_acc > max_acc or opt.save_mode == 'all':
+        if valid_bleu > max_bleu or opt.save_mode == 'all':
             if opt.save_mode == 'all':
                 path += f'_accuracy_{round(100*valid_acc, 3)}'
             path += '.chkpt'
@@ -250,15 +252,16 @@ def train(model, training_data, validation_data, optimizer, device, opt):
             print(f'    - [Info] The checkpoint file has been saved as {path}.')
 
         # update best val_acc
-        if valid_acc > max_acc:
-            max_acc = valid_acc
+        if valid_bleu > max_bleu:
+            max_bleu = valid_bleu
 
         wandb.log({
             'epoch': epoch_i,
             'train_perplexity': perplexity(train_loss),
             'train_accuracy': train_acc,
             'valid_preplexity': perplexity(valid_loss),
-            'valid_accuracy': valid_acc
+            'valid_accuracy': valid_acc,
+            'valid_bleu': valid_bleu
         })
 
     # end for
