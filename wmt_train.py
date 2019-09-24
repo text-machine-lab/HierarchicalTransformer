@@ -15,9 +15,10 @@ import torch.optim as optim
 import torch.utils.data
 import torch.distributed as distr
 from torch.utils.data.distributed import DistributedSampler
+from torch.utils.data.sampler import RandomSampler
 
 import youtokentome as yttm
-from sacrebleu import corpus_ble
+from sacrebleu import corpus_bleu
 
 from tqdm import tqdm
 
@@ -310,10 +311,15 @@ def main():
     parser.add_argument('-label_smoothing', action='store_true')
     parser.add_argument('-unet', action='store_true')
 
-    # distributed
-    parser.add_argument('-local_rank', type=int, help='GPU (group) number to use')
+    # for torch.distributed.launch
+    parser.add_argument('--single-gpu', action='store_true')
+    parser.add_argument('--local_rank', type=int, help='GPU (group) number to use')
 
     opt = parser.parse_args()
+
+    if not opt.single_gpu:
+        distr.init_process_group(backend='nccl')
+
     opt.cuda = not opt.no_cuda
     opt.d_word_vec = opt.d_model
 
@@ -343,18 +349,22 @@ def main():
         tgt_detokenizer=lambda x: tgt_bpe.decode(x)[0]
     )
 
-    training_sampler = DistributedSampler(training_dataset)
-    validation_sampler = DistributedSampler(validation_dataset)
+    training_sampler = RandomSampler(training_dataset)
+    validation_sampler = RandomSampler(validation_dataset)
+
+    if not opt.single_gpu:
+        training_sampler = DistributedSampler(training_dataset)
+        validation_sampler = DistributedSampler(validation_dataset)
 
     training_data = torch.utils.data.DataLoader(
         training_dataset,
-        num_workers=opt.num_workers, batch_size=opt.batch_size, collate_fn=paired_collate_fn, shuffle=True,
+        num_workers=opt.num_workers, batch_size=opt.batch_size, collate_fn=paired_collate_fn,
         sampler=training_sampler
     )
 
     validation_data = torch.utils.data.DataLoader(
         validation_dataset,
-        num_workers=opt.num_workers, batch_size=opt.batch_size, collate_fn=paired_collate_fn, shuffle=False,
+        num_workers=opt.num_workers, batch_size=opt.batch_size, collate_fn=paired_collate_fn,
         sampler=validation_sampler
     )
 
@@ -366,8 +376,6 @@ def main():
     # ========= Preparing Model ========= #
 
     print(opt)
-
-    distr.init_process_group(backend='c10d')
 
     device_str = 'cuda' if opt.cuda else 'cpu'
     device = torch.device(device_str, opt.local_rank)
@@ -386,8 +394,8 @@ def main():
         dropout=opt.dropout,
         unet=opt.unet).to(device)
 
-    if torch.cuda.device_count() > 1:
-        print(f'[Info] using GPUs: {torch.cuda.devai} (in distributed mode)')
+    if not opt.single_gpu:
+        print(f'[Info] using {torch.cuda.device_count()} GPUs (in distributed mode)')
         model = WrappedDistributedDataParallel(
             model, device_ids=[opt.local_rank], output_device=opt.local_rank
         )
@@ -401,7 +409,7 @@ def main():
     wandb.init(project='hierarchical_transformer', config=opt, notes='Debug run on small dataset')
     wandb.watch(model)
 
-    os.mkdir(os.path.dirname(opt.save_model), exist_ok=True)
+    os.makedirs(os.path.dirname(opt.save_model), exist_ok=True)
 
     train(model, training_data, validation_data, optimizer, device, opt)
 
