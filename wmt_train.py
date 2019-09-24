@@ -278,6 +278,7 @@ def main():
 
     parser.add_argument('-epoch', type=int, default=10)
     parser.add_argument('-batch_size', type=int, default=64)
+    parser.add_argument('-num_workers', type=int, default=4)
 
     # parser.add_argument('-d_word_vec', type=int, default=512)
     parser.add_argument('-d_model', type=int, default=512)
@@ -338,12 +339,12 @@ def main():
 
     training_data = torch.utils.data.DataLoader(
         training_dataset,
-        num_workers=2, batch_size=opt.batch_size, collate_fn=paired_collate_fn, shuffle=True
+        num_workers=opt.num_workers, batch_size=opt.batch_size, collate_fn=paired_collate_fn, shuffle=True,
     )
 
     validation_data = torch.utils.data.DataLoader(
         validation_dataset,
-        num_workers=2, batch_size=opt.batch_size, collate_fn=paired_collate_fn, shuffle=False
+        num_workers=opt.num_workers, batch_size=opt.batch_size, collate_fn=paired_collate_fn, shuffle=False,
     )
 
     # additional opt fields for coppatibility with original training script
