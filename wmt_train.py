@@ -2,6 +2,7 @@
 This script handling the training process for large translation dataset
 '''
 
+import os
 import argparse
 import math
 import time
@@ -259,9 +260,9 @@ def train(model, training_data, validation_data, optimizer, device, opt):
             'epoch': epoch_i,
             'train_perplexity': perplexity(train_loss),
             'train_accuracy': train_acc,
-            'valid_preplexity': perplexity(valid_loss),
-            'valid_accuracy': valid_acc,
-            'valid_bleu': valid_bleu
+            'val_preplexity': perplexity(valid_loss),
+            'val_accuracy': valid_acc,
+            'val_bleu': valid_bleu
         })
 
     # end for
@@ -384,6 +385,8 @@ def main():
 
     wandb.init(project='hierarchical_transformer', config=opt, notes='Debug run on small dataset')
     wandb.watch(model)
+
+    os.mkdir(os.path.dirname(opt.save_model), exist_ok=True)
 
     train(model, training_data, validation_data, optimizer, device, opt)
 
