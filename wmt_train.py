@@ -13,8 +13,11 @@ import torch
 import torch.nn.functional as F
 import torch.optim as optim
 import torch.utils.data
+import torch.distributed as distr
+from torch.utils.data.distributed import DistributedSampler
+
 import youtokentome as yttm
-from sacrebleu import corpus_bleu
+from sacrebleu import corpus_ble
 
 from tqdm import tqdm
 
@@ -23,7 +26,7 @@ from translation_dataset import RAFTranslationDataset, paired_collate_fn
 from transformer.Models import Transformer
 from transformer.Optim import ScheduledOptim
 from transformer.Translator import Translator
-from transformer.Utils import WrappedDataParallel
+from transformer.Utils import WrappedDistributedDataParallel
 
 SPECIAL_TOKENS = {Constants.PAD, Constants.UNK, Constants.BOS, Constants.EOS}
 
@@ -307,6 +310,9 @@ def main():
     parser.add_argument('-label_smoothing', action='store_true')
     parser.add_argument('-unet', action='store_true')
 
+    # distributed
+    parser.add_argument('-local_rank', type=int, help='GPU (group) number to use')
+
     opt = parser.parse_args()
     opt.cuda = not opt.no_cuda
     opt.d_word_vec = opt.d_model
@@ -337,14 +343,19 @@ def main():
         tgt_detokenizer=lambda x: tgt_bpe.decode(x)[0]
     )
 
+    training_sampler = DistributedSampler(training_dataset)
+    validation_sampler = DistributedSampler(validation_dataset)
+
     training_data = torch.utils.data.DataLoader(
         training_dataset,
         num_workers=opt.num_workers, batch_size=opt.batch_size, collate_fn=paired_collate_fn, shuffle=True,
+        sampler=training_sampler
     )
 
     validation_data = torch.utils.data.DataLoader(
         validation_dataset,
         num_workers=opt.num_workers, batch_size=opt.batch_size, collate_fn=paired_collate_fn, shuffle=False,
+        sampler=validation_sampler
     )
 
     # additional opt fields for coppatibility with original training script
@@ -353,13 +364,14 @@ def main():
     opt.max_token_seq_len = data_config['max_word_seq_len']
 
     # ========= Preparing Model ========= #
-    if opt.embs_share_weight and not opt.wmt:
-        assert training_data.dataset.src_word2idx == training_data.dataset.tgt_word2idx, \
-            'The src/tgt word2idx table are different but asked to share word embedding.'
 
     print(opt)
 
-    device = torch.device('cuda' if opt.cuda else 'cpu')
+    distr.init_process_group(backend='c10d')
+
+    device_str = 'cuda' if opt.cuda else 'cpu'
+    device = torch.device(device_str, opt.local_rank)
+
     model = Transformer(
         opt.src_vocab_size,
         opt.tgt_vocab_size,
@@ -375,8 +387,10 @@ def main():
         unet=opt.unet).to(device)
 
     if torch.cuda.device_count() > 1:
-        print(f'[Info] using {torch.cuda.device_count()} GPUs')
-        model = WrappedDataParallel(model)
+        print(f'[Info] using GPUs: {torch.cuda.devai} (in distributed mode)')
+        model = WrappedDistributedDataParallel(
+            model, device_ids=[opt.local_rank], output_device=opt.local_rank
+        )
 
     optimizer = ScheduledOptim(
         optim.Adam(
