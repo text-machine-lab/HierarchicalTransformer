@@ -485,9 +485,7 @@ class Transformer(nn.Module):
         super().__init__()
         self.len_max_seq = len_max_seq
         d_k = d_v = d_model // n_head
-        # this is the major modification of the project
-        # TODO change back to UNet encoder, right now we are trying GRU decoder
-        encoder_type = Encoder # if not unet else UNetEncoder
+        encoder_type = Encoder if not unet else UNetEncoder
 
         self.encoder = encoder_type(
             n_src_vocab=n_src_vocab, len_max_seq=len_max_seq,

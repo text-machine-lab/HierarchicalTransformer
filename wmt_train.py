@@ -89,7 +89,7 @@ def compute_bleu(model, dataloader, beam_size, max_seq_len):
 
     translator = Translator(None, model, beam_size=beam_size, max_seq_len=max_seq_len, n_best=1)
     for src_seq, src_pos, tgt_seq, tgt_pos in tqdm(
-            dataloader, mininterval=2, desc='  - (Translating)', leave=False):
+            dataloader, mininterval=2, desc='  - (Translating)', leave=True):
         all_hyp, all_scores = translator.translate_batch(src_seq, src_pos)
 
         for pred_sentence_hyp, true_translation in zip(all_hyp, tgt_seq):
@@ -131,7 +131,7 @@ def eval_epoch(model, validation_data, device, beam_size=None, max_seq_len=None)
     with torch.no_grad():
         for batch in tqdm(
                 validation_data,
-                desc='  - (Validation) ', leave=False):
+                desc='  - (Validation) ', leave=True):
 
             # prepare data
             # pos - position, it is added in collate_fn
@@ -177,7 +177,6 @@ def train(model, training_data, validation_data, optimizer, device, opt):
 
     global_step = 0
     max_bleu = 0
-    path = opt.save_model
 
     for epoch_i in range(opt.epoch):
         print(f'[ Epoch {epoch_i} ]')
@@ -196,8 +195,8 @@ def train(model, training_data, validation_data, optimizer, device, opt):
                 # save
                 if valid_bleu > max_bleu or opt.save_mode == 'all':
                     if opt.save_mode == 'all':
-                        path += f'_accuracy_{round(100*valid_acc, 3)}'
-                    path += '.chkpt'
+                        path = opt.save_model + f'_accuracy_{round(100*valid_acc, 3)}'
+                    path = opt.save_model + '.chkpt'
                     checkpoint = {
                         'model': model.state_dict(),
                         'settings': opt,
@@ -236,38 +235,6 @@ def train(model, training_data, validation_data, optimizer, device, opt):
         print(f'  - (Training)   ppl: {round(perplexity(train_loss), 5)}, '
               f'accuracy: {round(train_acc, 3)} %, '
               f'elapse: {round((time.time()-start)/60, 3)} min')
-
-        # evaluate at the end of epoch
-        valid_loss, valid_acc, valid_bleu = eval_epoch(
-            model, validation_data, device, opt.beam_size, opt.max_token_seq_len
-        )
-
-        # save
-        if valid_bleu > max_bleu or opt.save_mode == 'all':
-            if opt.save_mode == 'all':
-                path += f'_accuracy_{round(100*valid_acc, 3)}'
-            path += '.chkpt'
-            checkpoint = {
-                'model': model.state_dict(),
-                'settings': opt,
-                'epoch': epoch_i,
-                'step': global_step
-            }
-            torch.save(checkpoint, path)
-            print(f'    - [Info] The checkpoint file has been saved as {path}.')
-
-        # update best val_acc
-        if valid_bleu > max_bleu:
-            max_bleu = valid_bleu
-
-        wandb.log({
-            'epoch': epoch_i,
-            'train_perplexity': perplexity(train_loss),
-            'train_accuracy': train_acc,
-            'val_preplexity': perplexity(valid_loss),
-            'val_accuracy': valid_acc,
-            'val_bleu': valid_bleu
-        })
 
     # end for
     # TODO: load best model and test it
@@ -311,8 +278,9 @@ def main():
     parser.add_argument('-label_smoothing', action='store_true')
     parser.add_argument('-unet', action='store_true')
 
+    parser.add_argument('-single_gpu', action='store_true')
+
     # for torch.distributed.launch
-    parser.add_argument('--single-gpu', action='store_true')
     parser.add_argument('--local_rank', type=int, help='GPU (group) number to use')
 
     opt = parser.parse_args()
@@ -406,7 +374,7 @@ def main():
             betas=(0.9, 0.98), eps=1e-09),
         opt.d_model, opt.n_warmup_steps, lr_factor=opt.lr_factor)
 
-    wandb.init(project='hierarchical_transformer', config=opt, notes='Debug run on small dataset')
+    wandb.init(project='hierarchical_transformer', config=opt, notes='main run')
     wandb.watch(model)
 
     os.makedirs(os.path.dirname(opt.save_model), exist_ok=True)
