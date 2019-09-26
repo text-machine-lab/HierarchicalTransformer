@@ -390,6 +390,7 @@ def main():
 
     wandb.init(project='hierarchical_transformer', config=opt, resume=opt.wandb_resume)
     wandb.watch(model)
+    wandb.save(__file__)
 
     os.makedirs(os.path.dirname(opt.save_model), exist_ok=True)
 
