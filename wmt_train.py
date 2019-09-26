@@ -199,10 +199,15 @@ def train(model, training_data, validation_data, optimizer, device, opt):
                     path = opt.save_model + '.chkpt'
                     checkpoint = {
                         'model': model.state_dict(),
+                        'optimizer': optimizer.state_dict(),
                         'settings': opt,
                         'epoch': epoch_i,
                         'step': global_step
                     }
+                    if valid_bleu > max_bleu:
+                        wandb_path = os.path.join(wandb.run.dir, 'best_model.chkpt')
+                        torch.save(wandb_path, checkpoint)
+
                     torch.save(checkpoint, path)
                     print(f'    - [Info] The checkpoint file has been saved as {path}.')
             # end of evaluate
@@ -279,6 +284,7 @@ def main():
     parser.add_argument('-unet', action='store_true')
 
     parser.add_argument('-single_gpu', action='store_true')
+    parser.add_argument('-start_from_checkpoint', help='load model ')
 
     # for torch.distributed.launch
     parser.add_argument('--local_rank', type=int, help='GPU (group) number to use')
