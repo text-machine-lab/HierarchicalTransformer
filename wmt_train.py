@@ -205,7 +205,7 @@ def train(model, training_data, validation_data, optimizer, device, opt):
                         'step': global_step
                     }
                     if valid_bleu > max_bleu:
-                        wandb_path = os.path.join(wandb.run.dir, 'best_model.chkpt')
+                        wandb_path = os.path.join(wandb.run.dir, 'model_best.chkpt')
                         torch.save(wandb_path, checkpoint)
 
                     torch.save(checkpoint, path)
@@ -278,13 +278,14 @@ def main():
     parser.add_argument('-log', default=None)
     parser.add_argument('-save_model', default=None)
     parser.add_argument('-save_mode', type=str, choices=['all', 'best'], default='best')
+    parser.add_argument('-load_checkpoint', help='load model and optimizer from checkpoint')
+    parser.add_argument('-wandb_resume', type=str, default=False, help='wandb run name to resume it')
 
     parser.add_argument('-no_cuda', action='store_true')
     parser.add_argument('-label_smoothing', action='store_true')
     parser.add_argument('-unet', action='store_true')
 
     parser.add_argument('-single_gpu', action='store_true')
-    parser.add_argument('-start_from_checkpoint', help='load model ')
 
     # for torch.distributed.launch
     parser.add_argument('--local_rank', type=int, help='GPU (group) number to use')
@@ -368,19 +369,26 @@ def main():
         dropout=opt.dropout,
         unet=opt.unet).to(device)
 
-    if not opt.single_gpu:
-        print(f'[Info] using {torch.cuda.device_count()} GPUs (in distributed mode)')
-        model = WrappedDistributedDataParallel(
-            model, device_ids=[opt.local_rank], output_device=opt.local_rank
-        )
-
     optimizer = ScheduledOptim(
         optim.Adam(
             filter(lambda x: x.requires_grad, model.parameters()),
             betas=(0.9, 0.98), eps=1e-09),
         opt.d_model, opt.n_warmup_steps, lr_factor=opt.lr_factor)
 
-    wandb.init(project='hierarchical_transformer', config=opt, notes='main run')
+    if opt.load_checkpoint is not None:
+        checkpoint = torch.load(opt.load_checkpoint)
+        # NOTE: model should be on the same device as the model form checkpoint
+        model.load_state_dict(checkpoint['model'])
+        if 'optimizer' in checkpoint:
+            optimizer.load_state_dict(checkpoint['optimizer'])
+
+    if not opt.single_gpu:
+        print(f'[Info] using {torch.cuda.device_count()} GPUs (in distributed mode)')
+        model = WrappedDistributedDataParallel(
+            model, device_ids=[opt.local_rank], output_device=opt.local_rank
+        )
+
+    wandb.init(project='hierarchical_transformer', config=opt, resume=opt.wandb_resume)
     wandb.watch(model)
 
     os.makedirs(os.path.dirname(opt.save_model), exist_ok=True)
