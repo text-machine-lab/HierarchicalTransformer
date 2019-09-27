@@ -176,7 +176,7 @@ def train(model, training_data, validation_data, optimizer, device, opt):
     '''
 
     global_step = 0
-    max_bleu = 0
+    max_bleu = -1
 
     for epoch_i in range(opt.epoch):
         print(f'[ Epoch {epoch_i} ]')
@@ -197,6 +197,7 @@ def train(model, training_data, validation_data, optimizer, device, opt):
                     if opt.save_mode == 'all':
                         path = opt.save_model + f'_accuracy_{round(100*valid_acc, 3)}'
                     path = opt.save_model + '.chkpt'
+
                     checkpoint = {
                         'model': model.state_dict(),
                         'optimizer': optimizer.state_dict(),
@@ -206,7 +207,7 @@ def train(model, training_data, validation_data, optimizer, device, opt):
                     }
                     if valid_bleu > max_bleu:
                         wandb_path = os.path.join(wandb.run.dir, 'model_best.chkpt')
-                        torch.save(wandb_path, checkpoint)
+                        torch.save(checkpoint, wandb_path)
 
                     torch.save(checkpoint, path)
                     print(f'    - [Info] The checkpoint file has been saved as {path}.')

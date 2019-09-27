@@ -24,6 +24,12 @@ class ScheduledOptim():
             np.power(self.n_current_steps, -0.5),
             np.power(self.n_warmup_steps, -1.5) * self.n_current_steps])
 
+    def state_dict(self):
+        return self._optimizer.state_dict()
+
+    def load_state_dict(self, state_dict):
+        return self._optimizer.load_state_dict(state_dict)
+
     def _update_learning_rate(self):
         ''' Learning rate scheduling per step '''
 
