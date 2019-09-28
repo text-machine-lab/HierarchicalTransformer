@@ -24,7 +24,7 @@ from tqdm import tqdm
 
 import transformer.Constants as Constants
 from translation_dataset import RAFTranslationDataset, paired_collate_fn
-from transformer.Models import Transformer
+from transformer.Models import Transformer, MultiModel
 from transformer.Optim import ScheduledOptim
 from transformer.Translator import Translator
 from transformer.Utils import WrappedDistributedDataParallel
@@ -259,6 +259,8 @@ def main():
     parser.add_argument('-batch_size', type=int, default=64)
     parser.add_argument('-num_workers', type=int, default=4)
 
+    parser.add_argument('-encoder', default='transformer', choices=['transformer', 'gru', 'unet'])
+    parser.add_argument('-decoder', default='transformer', choices=['transformer', 'gru'])
     # parser.add_argument('-d_word_vec', type=int, default=512)
     parser.add_argument('-d_model', type=int, default=512)
     parser.add_argument('-d_inner_hid', type=int, default=2048)
@@ -286,7 +288,6 @@ def main():
 
     parser.add_argument('-no_cuda', action='store_true')
     parser.add_argument('-label_smoothing', action='store_true')
-    parser.add_argument('-unet', action='store_true')
 
     parser.add_argument('-single_gpu', action='store_true')
 
@@ -358,19 +359,22 @@ def main():
     device_str = 'cuda' if opt.cuda else 'cpu'
     device = torch.device(device_str, opt.local_rank)
 
-    model = Transformer(
+    model = MultiModel(
         opt.src_vocab_size,
         opt.tgt_vocab_size,
         opt.max_token_seq_len,
-        tgt_emb_prj_weight_sharing=opt.proj_share_weight,
-        emb_src_tgt_weight_sharing=opt.embs_share_weight,
-        d_model=opt.d_model,
         d_word_vec=opt.d_word_vec,
+        d_model=opt.d_model,
         d_inner=opt.d_inner_hid,
         n_layers=opt.n_layers,
         n_head=opt.n_head,
         dropout=opt.dropout,
-        unet=opt.unet).to(device)
+        tgt_emb_prj_weight_sharing=opt.proj_share_weight,
+        emb_src_tgt_weight_sharing=opt.embs_share_weight,
+        encoder=opt.encoder,
+        decoder=opt.decoder
+    )
+    model.to(device)
 
     optimizer = ScheduledOptim(
         optim.Adam(
