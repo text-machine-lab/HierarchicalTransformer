@@ -24,7 +24,7 @@ from tqdm import tqdm
 
 import transformer.Constants as Constants
 from translation_dataset import RAFTranslationDataset, paired_collate_fn
-from transformer.Models import Transformer, MultiModel
+from transformer.Models import MultiModel
 from transformer.Optim import ScheduledOptim
 from transformer.Translator import Translator
 from transformer.Utils import WrappedDistributedDataParallel
