@@ -149,20 +149,21 @@ def eval_epoch(model, validation_data, device, beam_size=None, max_seq_len=None)
             n_word = non_pad_mask.sum().item()
             n_word_total += n_word
             n_word_correct += n_correct
+        # end for
 
         if beam_size is not None:
             valid_bleu = compute_bleu(model, validation_data, beam_size, max_seq_len)
             wandb.log({'val_bleu': valid_bleu})
 
-    loss_per_word = total_loss/n_word_total
+        loss_per_word = total_loss/n_word_total
 
-    wandb.log({'val_loss': loss_per_word})
+        wandb.log({'val_loss': loss_per_word})
 
-    accuracy = n_word_correct/n_word_total
+        accuracy = n_word_correct/n_word_total
 
-    print(f'  - (Validation) ppl: {round(perplexity(loss_per_word), 5)}, '
-          f'accuracy: {round(accuracy, 3)} %, '
-          f'elapse: {round((time.time()-start)/60, 3)} min')
+        print(f'  - (Validation) ppl: {round(perplexity(loss_per_word), 5)}, '
+            f'accuracy: {round(accuracy, 3)} %, '
+            f'elapse: {round((time.time()-start)/60, 3)} min')
 
     model.train()
     return loss_per_word, accuracy, valid_bleu
@@ -208,6 +209,7 @@ def train(model, training_data, validation_data, optimizer, device, opt):
                     if valid_bleu > max_bleu:
                         wandb_path = os.path.join(wandb.run.dir, 'model_best.chkpt')
                         torch.save(checkpoint, wandb_path)
+                        print('    - [Info] Updated best_model.chkpt at wandb')
 
                     torch.save(checkpoint, path)
                     print(f'    - [Info] The checkpoint file has been saved as {path}.')
