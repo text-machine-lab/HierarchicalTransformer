@@ -814,6 +814,7 @@ class VariationalSolver(Solver):
 
             print('\n<Validation>...')
             self.validation_loss = self.evaluate()
+            wandb.log({'val_loss': self.validation_loss})
             if self.validation_loss <= min_val_loss:
                 min_val_loss = self.validation_loss
                 min_val_loss_epoch = epoch_i

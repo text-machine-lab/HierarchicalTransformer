@@ -160,13 +160,18 @@ class UNetEncoder(nn.Module):
 
         assert n_layers % 2 == 0  # we have equal up layers as down layers
 
+        # TODO remove convolution from in/out layers
         self.in_layer = UNetEncoderLayer(d_model, d_inner, n_head, d_k, d_v, dropout=dropout, type_='same', skip_connect=True)
+        #self.in_layer2 = UNetEncoderLayer(d_model, d_inner, n_head, d_k, d_v, dropout=dropout, type_='none', skip_connect=True)
         self.out_layer = UNetEncoderLayer(d_model, d_inner, n_head, d_k, d_v, dropout=dropout, type_='same', skip_connect=True)
+        #self.out_layer2 = UNetEncoderLayer(d_model, d_inner, n_head, d_k, d_v, dropout=dropout, type_='none', skip_connect=True)
 
+        # TODO undo change to number of layers
         depth = n_layers // 2 - 1
 
         # each layer increases in size by the sqrt of 2 to keep computation relatively constant
-        # TODO add back sqrt(2) layer sizes
+        # multiples = [1 for i in range(depth + 1)]
+
         multiples = [sqrt(2) ** i for i in range(depth + 1)]
         layer_sizes = [round(d_model * multiples[i]) for i in range(depth + 1)]  # [d_model for _ in range(depth+1)]  #
         inner_sizes = [round(d_inner * multiples[i]) for i in range(depth + 1)]
@@ -196,8 +201,6 @@ class UNetEncoder(nn.Module):
 
     def forward(self, src_seq, src_pos, src_segs=None, return_attns=False):
 
-        # TODO modify this to return a list of hidden layers
-
         # -- Prepare masks
         slf_attn_mask = get_attn_key_pad_mask(seq_k=src_seq, seq_q=src_seq)  # b x l
         non_pad_mask = get_non_pad_mask(src_seq)  # b x lq x lk
@@ -223,6 +226,11 @@ class UNetEncoder(nn.Module):
             non_pad_mask=non_pad_mask,
             slf_attn_mask=slf_attn_mask)
 
+        # enc_output, enc_slf_attn = self.in_layer2(
+        #     enc_output,
+        #     non_pad_mask=non_pad_mask,
+        #     slf_attn_mask=slf_attn_mask)
+
         first_output = enc_output
         all_layer_outputs.append(enc_output)
         all_non_pads.append(non_pad_mask)
@@ -241,11 +249,10 @@ class UNetEncoder(nn.Module):
             all_non_pads.append(layer_non_pad)
 
             # compute slf_attn_mask from pad specifications for current and previous layer
-            # TODO changing pad mask to go from pooled dim to pooled dim
             # len_q = layer_non_pad.size(1)
             # padding_mask = (1 - layer_non_pad).squeeze(2).byte()
             # padding_mask = padding_mask.unsqueeze(1).expand(-1, len_q, -1)  # b x lq x lk
-            padding_mask = get_attn_mask(layer_non_pad, layer_non_pad)
+            padding_mask = get_attn_mask(layer_non_pad, prev_layer_non_pad)
 
             enc_output, enc_slf_attn = layer(
                 enc_output,
@@ -284,10 +291,10 @@ class UNetEncoder(nn.Module):
             all_non_pads.append(layer_non_pad)
 
             # compute slf_attn_mask from pad specifications for current and previous layer
-            len_q = layer_non_pad.size(1)
-            #TODO removed prev_
-            padding_mask = (1 - layer_non_pad).squeeze(2).byte()
-            padding_mask = padding_mask.unsqueeze(1).expand(-1, len_q, -1)  # b x lq x lk
+            # len_q = layer_non_pad.size(1)
+            # padding_mask = (1 - layer_non_pad).squeeze(2).byte()
+            # padding_mask = padding_mask.unsqueeze(1).expand(-1, len_q, -1)  # b x lq x lk
+            padding_mask = get_attn_mask(layer_non_pad, prev_layer_non_pad)
 
             # if not first decoder layer, we add input of previous layer with skip connection to respective down layer
             layer_input = enc_output + down_output if enc_output is not None else down_output
@@ -311,6 +318,11 @@ class UNetEncoder(nn.Module):
             non_pad_mask=non_pad_mask,
             slf_attn_mask=slf_attn_mask)
 
+        # enc_output, enc_slf_attn = self.out_layer2(
+        #     enc_output,  # HERE WE ADD FIRST DOWN LAYER OUTPUT FOR FINAL PREDICTION
+        #     non_pad_mask=non_pad_mask,
+        #     slf_attn_mask=slf_attn_mask)
+
         all_layer_outputs.append(enc_output)
 
         if return_attns:
@@ -319,7 +331,6 @@ class UNetEncoder(nn.Module):
         if return_attns:
             return enc_output, slf_attn_list
 
-        # TODO now returning all layers outputs, not just the last layer
         # return enc_output,
         all_encoder_layers = list(zip(all_layer_outputs, all_non_pads))
 
@@ -556,7 +567,7 @@ class MultiModel(nn.Module):
                 n_layers=n_layers, n_head=n_head, d_k=d_k, d_v=d_v,
                 dropout=dropout)
 
-        if encoder == 'unet':
+        elif encoder == 'unet':
             self.encoder = UNetEncoder(
                 n_src_vocab=n_src_vocab, len_max_seq=len_max_seq,
                 d_word_vec=d_word_vec, d_model=d_model, d_inner=d_inner,

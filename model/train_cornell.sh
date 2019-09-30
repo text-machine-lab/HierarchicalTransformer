@@ -1,26 +1,33 @@
-#TODO as soon as training is finished
+echo "######################### UNET TRANSFORMER ################################"
+
+python train.py --data=cornell --model=MULTI --batch_size=32 --n_epoch=100 --eval_batch_size=32 \
+   --encoder_hidden_size=256 --decoder_hidden_size=256  --embedding_size=256 --context_size=256 \
+   --encoder_type='unet' --decoder_type='transformer' --tg_enable --msg='full' --max_history=150 \
+   --full_samples_file=../data/unet_cornell_samples1.txt --max_samples=10000 --save_path=../data/unet_cornell_ckpt
+
+: '
 
 echo "#################### HRED ############################"
 
 python train.py --data=cornell --model=HRED --batch_size=32 --n_epoch=100 --eval_batch_size=32 \
    --encoder_hidden_size=256 --decoder_hidden_size=256  --embedding_size=256 --max_history=150 --context_size=256 \
    --tg_enable --msg='full' --full_samples_file=../data/hred_cornell_samples1.txt --max_samples=10000 --save_path=../data/hred_cornell_ckpt \
+   --num_layers=1
 
-: '
 
 echo "#################### VHCR ############################"
 
-python train.py --data=cornell --model=VHCR --batch_size=32 --n_epoch=0 --eval_batch_size=32 \
+python train.py --data=cornell --model=VHCR --batch_size=32 --n_epoch=100 --eval_batch_size=32 \
    --encoder_hidden_size=256 --decoder_hidden_size=256  --embedding_size=256 --max_history=150 --context_size=256 \
    --tg_enable --msg='full' --full_samples_file=../data/vhcr_cornell_samples1.txt --max_samples=10000 --save_path=../data/vhcr_cornell_ckpt \
-   --restore
+   --num_layers=1
 
 echo "#################### VHRED ############################"
 
 python train.py --data=cornell --model=VHRED --batch_size=32 --n_epoch=100 --eval_batch_size=32 \
    --encoder_hidden_size=256 --decoder_hidden_size=256  --embedding_size=256 --max_history=150 --context_size=256 \
    --tg_enable --msg='full' --full_samples_file=../data/vhred_cornell_samples1.txt --max_samples=10000 --save_path=../data/vhred_cornell_ckpt \
-   --restore
+   --num_layers=1
 
 echo "######################### TRANSFORMER #######################################"
 
@@ -28,13 +35,6 @@ python train.py --data=cornell --model=MULTI --batch_size=32 --n_epoch=100 --eva
    --encoder_hidden_size=256 --decoder_hidden_size=256  --embedding_size=256 --context_size=256 \
    --encoder_type='transformer' --decoder_type='transformer' --tg_enable --msg='full' --max_history=150 \
    --full_samples_file=../data/transformer_cornell_samples1.txt --max_samples=10000 --save_path=../data/trans_cornell_ckpt
-
-echo "######################### UNET TRANSFORMER ################################"
-
-python train.py --data=cornell --model=MULTI --batch_size=32 --n_epoch=100 --eval_batch_size=32 \
-   --encoder_hidden_size=256 --decoder_hidden_size=256  --embedding_size=256 --context_size=256 \
-   --encoder_type='unet' --decoder_type='transformer' --tg_enable --msg='full' --max_history=150 \
-   --full_samples_file=../data/unet_cornell_samples1.txt --max_samples=10000 --save_path=../data/unet_cornell_ckpt
 
 echo "#################### GRU #############################"
 

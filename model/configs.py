@@ -10,7 +10,8 @@ from layers.rnncells import StackedLSTMCell, StackedGRUCell
 
 project_dir = Path(__file__).resolve().parent.parent
 data_dir = project_dir.joinpath('datasets')
-data_dict = {'cornell': data_dir.joinpath('cornell'), 'ubuntu': data_dir.joinpath('ubuntu')}
+data_dict = {'cornell': data_dir.joinpath('cornell'), 'ubuntu': data_dir.joinpath('ubuntu'),
+             'personachat': data_dir.joinpath('personachat')}
 optimizer_dict = {'RMSprop': optim.RMSprop, 'Adam': optim.Adam}
 rnn_dict = {'lstm': nn.LSTM, 'gru': nn.GRU}
 rnncell_dict = {'lstm': StackedLSTMCell, 'gru': StackedGRUCell}
