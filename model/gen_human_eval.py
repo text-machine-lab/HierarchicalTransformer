@@ -4,19 +4,19 @@ import random
 import pickle
 import sys
 
-EVAL_DIR = '../data/model_samples'
-OUTPUT_FILE = '../data/human_evaluation.txt'
-ANSWER_FILE = '../data/human_answer_key.pkl'
+EVAL_DIR = '../data/personachat_model_samples'
+OUTPUT_DIR = '../data/human_evaluation/'
 
 
 # the key model is the model we will compare all other models to
 KEY_MODEL = 'unet'
 EXAMPLES_PER_MODEL = 10000
+PAGE_BREAK = 1000
 MAX_LENGTH = 150
 SEED = 1234
 
-def load_examples(filename):
-    raw = open(os.path.join(EVAL_DIR, filename), 'r').read()
+def load_examples(pathname):
+    raw = open(os.path.join(pathname), 'r').read()
     # split examples by gap
     examples = raw.split('\n\n')
     # split each example into input sentence, ground truth, and generated response
@@ -40,7 +40,7 @@ def extract_examples_per_model(key_model_name, eval_dir, max_examples, verbose=T
     # grab all filenames in evaluation directory
     model_files = [f for f in os.listdir(eval_dir) if os.path.isfile(os.path.join(eval_dir, f))]
     model_names = [f.split('_')[0] for f in model_files]
-    model_examples = [load_examples(f) for f in model_files]
+    model_examples = [load_examples(os.path.join(eval_dir, f)) for f in model_files]
 
     # prune model examples
     model_examples = [examples[:max_examples] for examples in model_examples]
@@ -112,31 +112,36 @@ if __name__ == '__main__':
     pairs_flat = pairs_flat_no_pruned_history
 
     # write answer key to file, make sure both files are aligned
-    pickle.dump(pairs_flat, open(ANSWER_FILE, 'wb'))
+    pickle.dump(pairs_flat, open(os.path.join(OUTPUT_DIR, 'answers.pkl'), 'wb'))
 
     print(pairs_flat[1])
     print('Number of comparisons: %s' % len(pairs_flat))
 
-    with open(OUTPUT_FILE, 'w') as f:
-        for pair in pairs_flat:
+    n_files = len(pairs_flat) // PAGE_BREAK + 1
+    os.makedirs(OUTPUT_DIR, exist_ok=True)
+    output_files = [open(os.path.join(OUTPUT_DIR, 'eval' + str(i) + '.txt'), 'w') for i in range(n_files)]
 
-            ((first_name, first_example), (second_name, second_example)) = pair
+    for i, pair in enumerate(pairs_flat):
 
-            first_history, first_label, first_response = first_example
-            second_history, second_label, second_response = second_example
+        f = output_files[i // PAGE_BREAK]
 
-            other_model = first_name if first_name != KEY_MODEL else second_name
+        ((first_name, first_example), (second_name, second_example)) = pair
 
-            better = 'left' if first_name != KEY_MODEL else 'right'
+        first_history, first_label, first_response = first_example
+        second_history, second_label, second_response = second_example
 
-            f.write('###\n')
-            f.write('H: %s\n' % first_history)
-            f.write('R #1: %s\n' % first_response)
-            f.write('R #2: %s\n' % second_response)
-            f.write('Which is better?: \n')
+        other_model = first_name if first_name != KEY_MODEL else second_name
+
+        better = 'left' if first_name != KEY_MODEL else 'right'
+
+        f.write('###\n')
+        f.write('H: %s\n' % first_history)
+        f.write('R #1: %s\n' % first_response)
+        f.write('R #2: %s\n' % second_response)
+        f.write('Which is better?: \n')
 
     # assert evaluation file has same number of pairs as answer key
-    assert len(pairs_flat) == len(open(OUTPUT_FILE, 'r').read().split('###')) - 1
+    #assert len(pairs_flat) == len(open(OUTPUT_FILE, 'r').read().split('###')) - 1
 
 
 

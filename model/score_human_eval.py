@@ -3,13 +3,16 @@ import os
 
 KEY_MODEL = 'unet'
 
-EVAL_DIR = '../data/model_samples'
-OUTPUT_FILE = '../data/human_evaluation.txt'
-ANSWER_FILE = '../data/human_answer_key.pkl'
+EVAL_DIR = '../data/personachat_model_samples'
+OUTPUT_DIR = '../data/human_evaluation/'
 
-pairs = pickle.load(open(ANSWER_FILE, 'rb'))
+pairs = pickle.load(open(os.path.join(OUTPUT_DIR, 'answers.pkl'), 'rb'))
 
-human_evals = open(OUTPUT_FILE, 'r').read().split('###')[1:]
+eval_filenames = [file for file in os.listdir(OUTPUT_DIR) if 'eval' in file]
+eval_texts = [open(os.path.join(OUTPUT_DIR, filename), 'r').read() for filename in eval_filenames]
+human_evals = ''.join(eval_texts).split('###')[1:]
+
+#human_evals = open(OUTPUT_FILE, 'r').read().split('###')[1:]
 
 assert len(pairs) == len(human_evals)
 
@@ -21,7 +24,7 @@ key_wins   = {model_name: 0 for model_name in model_names}
 key_ties   = {model_name: 0 for model_name in model_names}
 key_losses = {model_name: 0 for model_name in model_names}
 
-
+n_evaluations = 0
 for answer, eval in zip(pairs, human_evals):
 
     ((first_name, first_example), (second_name, second_example)) = answer
@@ -44,6 +47,7 @@ for answer, eval in zip(pairs, human_evals):
     first_is_key = True if first_name == KEY_MODEL else False
 
     if vote != '':
+        n_evaluations += 1
         if vote == 'left' or vote == 'first' or vote == '1' or vote == '#1':
             # user voted that first response was better
             if first_is_key:
@@ -66,3 +70,5 @@ for answer, eval in zip(pairs, human_evals):
 for model_name, _, _ in zip(key_wins, key_ties, key_losses) :
     print('%s versus %s' % (KEY_MODEL, model_name))
     print('wins:', key_wins[model_name], ', ties:', key_ties[model_name], ', losses:', key_losses[model_name])
+
+print('Total # of evaluations: %s' % n_evaluations)
