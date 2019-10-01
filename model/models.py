@@ -132,8 +132,10 @@ class MULTI(nn.Module):
         if not decode:
             return logits
         else:
-            batch_hyp = self.translator.sample_topk_batch(histories, history_pos, src_segs=segments)
-            return batch_hyp
+            #TODO go back to topk decoding
+            #batch_hyp = self.translator.sample_topk_batch(histories, history_pos, src_segs=segments)
+            batch_hyp, batch_scores = self.translator.translate_batch(histories, history_pos, src_segs=segments)
+            return [sent[0] for sent in batch_hyp]  # torch.LongTensor(batch_hyp).squeeze(1)
         # history_length = (histories != 0).sum(1) - 1
         #
         # history_pos = calc_pos(histories)

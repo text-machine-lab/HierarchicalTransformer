@@ -14,7 +14,6 @@ python train.py --data=cornell --model=HRED --batch_size=32 --n_epoch=100 --eval
    --tg_enable --msg='full' --full_samples_file=../data/hred_cornell_samples1.txt --max_samples=10000 --save_path=../data/hred_cornell_ckpt \
    --num_layers=1
 
-
 echo "#################### VHCR ############################"
 
 python train.py --data=cornell --model=VHCR --batch_size=32 --n_epoch=100 --eval_batch_size=32 \

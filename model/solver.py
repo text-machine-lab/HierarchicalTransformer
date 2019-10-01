@@ -28,7 +28,7 @@ from transformer.Optim import ScheduledOptim
 
 import tgalert
 
-alert = tgalert.TelegramAlert()
+alert = None
 
 
 word2vec_path = "../datasets/GoogleNews-vectors-negative300.bin"
@@ -109,6 +109,7 @@ class Solver(object):
         """Manually called constructor for the Solver object. Initializes the chosen model from models.py, restores
         it from save if specified by the --restore flag and initializes wandb with model configuration details. Also
         sets up the optimizer."""
+        global alert
         if self.model is None:
             self.model = getattr(models, self.config.model)(self.config)
 
@@ -141,6 +142,8 @@ class Solver(object):
         str_config = {k: str(v) for k, v in self.config.__dict__.items()}
         wandb.init(project='hierarchical_transformer', notes=self.config.msg, config=str_config)
         wandb.watch(self.model)
+
+        alert = tgalert.TelegramAlert()
 
         if torch.cuda.is_available() and cuda:
             self.model.cuda()

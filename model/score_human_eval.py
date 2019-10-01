@@ -9,7 +9,9 @@ OUTPUT_DIR = '../data/human_evaluation/'
 pairs = pickle.load(open(os.path.join(OUTPUT_DIR, 'answers.pkl'), 'rb'))
 
 eval_filenames = [file for file in os.listdir(OUTPUT_DIR) if 'eval' in file]
+eval_filenames = sorted(eval_filenames, key=lambda s: int(s.replace('eval', '').replace('.txt', '')))
 eval_texts = [open(os.path.join(OUTPUT_DIR, filename), 'r').read() for filename in eval_filenames]
+
 human_evals = ''.join(eval_texts).split('###')[1:]
 
 #human_evals = open(OUTPUT_FILE, 'r').read().split('###')[1:]

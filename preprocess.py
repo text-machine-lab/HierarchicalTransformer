@@ -77,6 +77,8 @@ def main():
     parser.add_argument('-train_tgt', required=True)
     parser.add_argument('-valid_src', required=True)
     parser.add_argument('-valid_tgt', required=True)
+    parser.add_argument('-test_src', required=True)
+    parser.add_argument('-test_tgt', required=True)
     parser.add_argument('-save_data', required=True)
     parser.add_argument('-max_len', '--max_word_seq_len', type=int, default=50)
     parser.add_argument('-min_word_count', type=int, default=5)
@@ -119,6 +121,20 @@ def main():
     valid_src_word_insts, valid_tgt_word_insts = list(zip(*[
         (s, t) for s, t in zip(valid_src_word_insts, valid_tgt_word_insts) if s and t]))
 
+    test_src_word_insts = read_instances_from_file(
+        opt.test_src, opt.max_word_seq_len, opt.keep_case)
+    test_tgt_word_insts = read_instances_from_file(
+        opt.test_tgt, opt.max_word_seq_len, opt.keep_case)
+
+    if len(test_src_word_insts) != len(test_tgt_word_insts):
+        print('[Warning] The validation instance count is not equal.')
+        min_inst_count = min(len(test_src_word_insts), len(test_tgt_word_insts))
+        test_src_word_insts = test_src_word_insts[:min_inst_count]
+        test_tgt_word_insts = test_tgt_word_insts[:min_inst_count]
+
+    test_src_word_insts, test_tgt_word_insts = list(zip(*[
+        (s, t) for s, t in zip(test_src_word_insts, test_tgt_word_insts) if s and t]))
+
     # Build vocabulary
     if opt.vocab:
         predefined_data = torch.load(opt.vocab)
@@ -143,10 +159,12 @@ def main():
     print('[Info] Convert source word instances into sequences of word index.')
     train_src_insts = convert_instance_to_idx_seq(train_src_word_insts, src_word2idx)
     valid_src_insts = convert_instance_to_idx_seq(valid_src_word_insts, src_word2idx)
+    test_src_insts = convert_instance_to_idx_seq(test_src_word_insts, src_word2idx)
 
     print('[Info] Convert target word instances into sequences of word index.')
     train_tgt_insts = convert_instance_to_idx_seq(train_tgt_word_insts, tgt_word2idx)
     valid_tgt_insts = convert_instance_to_idx_seq(valid_tgt_word_insts, tgt_word2idx)
+    test_tgt_insts = convert_instance_to_idx_seq(test_tgt_word_insts, tgt_word2idx)
 
     data = {
         'settings': opt,
@@ -158,7 +176,10 @@ def main():
             'tgt': train_tgt_insts},
         'valid': {
             'src': valid_src_insts,
-            'tgt': valid_tgt_insts}}
+            'tgt': valid_tgt_insts},
+        'test': {
+            'src': test_src_insts,
+            'tgt': test_tgt_insts}}
 
     src_idx2word = {idx: word for word, idx in src_word2idx.items()}
     tgt_idx2word = {idx: word for word, idx in tgt_word2idx.items()}
@@ -172,11 +193,20 @@ def main():
         print('Response: %s' % response)
     print()
 
-    # print training examples
+    # print validation examples
     print('### Validation examples ###\n')
     for i in range(5):
         history = convert_idx_seq_to_instance(valid_src_insts[i], src_idx2word)
         response = convert_idx_seq_to_instance(valid_tgt_insts[i], tgt_idx2word)
+        print('History: %s' % history)
+        print('Response: %s' % response)
+    print()
+
+    # print test examples
+    print('### Test examples ###\n')
+    for i in range(5):
+        history = convert_idx_seq_to_instance(test_src_insts[i], src_idx2word)
+        response = convert_idx_seq_to_instance(test_tgt_insts[i], tgt_idx2word)
         print('History: %s' % history)
         print('Response: %s' % response)
     print()

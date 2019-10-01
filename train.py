@@ -13,7 +13,7 @@ import torch.optim as optim
 import torch.utils.data
 import transformer.Constants as Constants
 from translation_dataset import TranslationDataset, paired_collate_fn
-from transformer.Models import Transformer
+from transformer.Models import MultiModel
 from transformer.Optim import ScheduledOptim
 from torch.utils.tensorboard import SummaryWriter
 import datetime
@@ -155,6 +155,7 @@ def train(model, training_data, validation_data, optimizer, device, opt):
             log_vf.write('epoch,loss,ppl,accuracy\n')
 
     valid_accus = []
+    min_val_loss = float('inf')
     for epoch_i in range(opt.epoch):
         print('[ Epoch', epoch_i, ']')
 
@@ -172,6 +173,12 @@ def train(model, training_data, validation_data, optimizer, device, opt):
                 'elapse: {elapse:3.3f} min'.format(
                     ppl=math.exp(min(valid_loss, 100)), accu=100*valid_accu,
                     elapse=(time.time()-start)/60))
+
+        if valid_loss <= min_val_loss:
+            min_val_loss = valid_loss
+        else:
+            print('Validation loss increased. Stopping training')
+            break
 
         valid_accus += [valid_accu]
 
@@ -199,6 +206,8 @@ def train(model, training_data, validation_data, optimizer, device, opt):
                 log_vf.write('{epoch},{loss: 8.5f},{ppl: 8.5f},{accu:3.3f}\n'.format(
                     epoch=epoch_i, loss=valid_loss,
                     ppl=math.exp(min(valid_loss, 100)), accu=100*valid_accu))
+
+    print('Minimum validation loss: %s' % min_val_loss)
 
     # This code allows for saving a randomly initialized model
     if opt.epoch == 0:
@@ -256,7 +265,7 @@ def main():
     data = torch.load(opt.data)
     opt.max_token_seq_len = data['settings'].max_token_seq_len
 
-    training_data, validation_data = prepare_dataloaders(data, opt)
+    training_data, validation_data, test_data = prepare_dataloaders(data, opt)
 
     opt.src_vocab_size = training_data.dataset.src_vocab_size
     opt.tgt_vocab_size = training_data.dataset.tgt_vocab_size
@@ -268,22 +277,25 @@ def main():
 
     print(opt)
 
+    encoder_type = 'transformer' if not opt.unet else 'unet'
+
+    print('Encoder type: %s' % encoder_type)
+
     device = torch.device('cuda' if opt.cuda else 'cpu')
-    transformer = Transformer(
+    transformer = MultiModel(
         opt.src_vocab_size,
         opt.tgt_vocab_size,
         opt.max_token_seq_len,
         tgt_emb_prj_weight_sharing=opt.proj_share_weight,
         emb_src_tgt_weight_sharing=opt.embs_share_weight,
-        d_k=opt.d_k,
-        d_v=opt.d_v,
         d_model=opt.d_model,
         d_word_vec=opt.d_word_vec,
         d_inner=opt.d_inner_hid,
         n_layers=opt.n_layers,
         n_head=opt.n_head,
         dropout=opt.dropout,
-        unet=opt.unet).to(device)
+        encoder=encoder_type,
+        decoder='transformer').to(device)
 
     optimizer = ScheduledOptim(
         optim.Adam(
@@ -292,6 +304,14 @@ def main():
         opt.d_model, opt.n_warmup_steps, lr_factor=opt.lr_factor)
 
     train(transformer, training_data, validation_data, optimizer, device, opt)
+
+
+    print('Evaluating test perplexity')
+
+    loss_per_word, accuracy = eval_epoch(-1, model=transformer, validation_data=test_data, device=device)
+
+    print('Test perplexity: %s' % (math.exp(loss_per_word)))
+
 
 
 def prepare_dataloaders(data, opt):
@@ -316,7 +336,18 @@ def prepare_dataloaders(data, opt):
         num_workers=2,
         batch_size=opt.batch_size,
         collate_fn=paired_collate_fn)
-    return train_loader, valid_loader
+
+    test_loader = torch.utils.data.DataLoader(
+        TranslationDataset(
+            src_word2idx=data['dict']['src'],
+            tgt_word2idx=data['dict']['tgt'],
+            src_insts=data['test']['src'],
+            tgt_insts=data['test']['tgt']),
+        num_workers=2,
+        batch_size=opt.batch_size,
+        collate_fn=paired_collate_fn)
+
+    return train_loader, valid_loader, test_loader
 
 
 if __name__ == '__main__':

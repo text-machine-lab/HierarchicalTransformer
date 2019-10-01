@@ -9,7 +9,6 @@ import transformer.Constants as Constants
 from transformer.Layers import UNetEncoderLayer, EncoderLayer, DecoderLayer
 from transformer.SubLayers import MultiHeadAttention
 from model.utils.vocab import SOS_ID
-import wandb
 
 __author__ = "Yu-Hsiang Huang"
 
@@ -113,8 +112,6 @@ class Encoder(nn.Module):
 
         # -- Forward
         enc_output = self.src_word_emb(src_seq)
-
-        wandb.log({'word_emb_std': enc_output.std()})
 
         enc_output = enc_output + self.position_enc(src_pos)  # * self.position_bias
 

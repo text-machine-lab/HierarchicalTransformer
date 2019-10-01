@@ -7,7 +7,7 @@ EXAMPLES_PER_MODEL = 10000
 PAGE_BREAK = 1000
 MAX_LENGTH = 150
 SEED = 1234
-BIGRAM = False
+BIGRAM = True
 
 if __name__ == '__main__':
     model_files = [f for f in os.listdir(EVAL_DIR) if os.path.isfile(os.path.join(EVAL_DIR, f))]
@@ -20,7 +20,11 @@ if __name__ == '__main__':
 
         # grab generated responses
         responses = [example[2] for example in examples]
+
+        response_lens = [len(example[2].split()) for example in examples]
+        mean_response_len = sum(response_lens) / len(response_lens)
         print('Number of responses: %s' % len(responses))
+        print('Mean response length: %s' % mean_response_len)
 
         for response in responses:
             prev_token = None
