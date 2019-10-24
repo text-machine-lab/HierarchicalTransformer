@@ -6,7 +6,7 @@ import torch.optim as optim
 import torch.nn.functional as F
 import models
 from layers import masked_cross_entropy
-from utils import to_var, time_desc_decorator, pad_and_pack, normal_kl_div, to_bow, bag_of_words_loss, \
+from dataset import to_var, time_desc_decorator, pad_and_pack, normal_kl_div, to_bow, bag_of_words_loss, \
     normal_kl_div, embedding_metric, push_zeros_right, SOS_ID
 import os
 import random

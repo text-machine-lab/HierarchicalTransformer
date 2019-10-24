@@ -1,2 +1,2 @@
-python train.py -data data/twitter.pt -save_model trained -save_mode best -proj_share_weight -label_smoothing \
-    -epoch=100 -n_warmup_steps=2000 -lr_factor=1.0 -d_model=256 -d_inner_hid=1024 -n_layers=6 -batch_size=64 -unet
+python train.py -data data/twitter.pt -save_model data/trained -save_mode best -proj_share_weight -label_smoothing \
+    -epoch=1 -n_warmup_steps=2000 -lr_factor=1.0 -d_model=256 -d_inner_hid=1024 -n_layers=6 -batch_size=64

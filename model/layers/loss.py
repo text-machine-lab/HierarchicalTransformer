@@ -1,7 +1,7 @@
 import torch
 from torch.nn import functional as F
 import torch.nn as nn
-from utils import to_var, sequence_mask
+from dataset import to_var, sequence_mask
 
 
 # https://gist.github.com/jihunchoi/f1434a77df9db1bb337417854b398df1

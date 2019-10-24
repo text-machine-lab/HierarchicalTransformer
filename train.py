@@ -259,7 +259,7 @@ def main():
 
     # new code to run Tensorboard
     global writer
-    writer = SummaryWriter('logdir/' + str(datetime.datetime.now()) + ' ' + str(opt))
+    writer = SummaryWriter('data/logdir/' + str(datetime.datetime.now()) + ' ' + str(opt))
 
     #========= Loading Dataset =========#
     data = torch.load(opt.data)

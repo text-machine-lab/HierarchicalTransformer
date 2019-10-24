@@ -1,7 +1,7 @@
 from solver import *
 from data_loader import get_loader
 from configs import get_config
-from utils import Vocab
+from dataset import Vocab
 import os
 import pickle
 from models import VariationalModels

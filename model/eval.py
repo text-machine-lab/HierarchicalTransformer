@@ -1,7 +1,7 @@
 from solver import Solver, VariationalSolver
 from data_loader import get_loader
 from configs import get_config
-from utils import Vocab, Tokenizer
+from dataset import Vocab, Tokenizer
 import os
 import pickle
 from models import VariationalModels
