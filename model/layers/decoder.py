@@ -5,7 +5,7 @@ from torch.nn import functional as F
 from .rnncells import StackedLSTMCell, StackedGRUCell
 from .beam_search import Beam
 from .feedforward import FeedForward
-from dataset import to_var, SOS_ID, UNK_ID, EOS_ID
+from utils import to_var, SOS_ID, UNK_ID, EOS_ID
 import math
 
 

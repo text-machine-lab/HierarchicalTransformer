@@ -2,7 +2,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from torch.nn.utils.rnn import pad_packed_sequence, pack_padded_sequence, PackedSequence
-from dataset import to_var, reverse_order_valid, PAD_ID
+from utils import to_var, reverse_order_valid, PAD_ID
 from .rnncells import StackedGRUCell, StackedLSTMCell
 
 import copy

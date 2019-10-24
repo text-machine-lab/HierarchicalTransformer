@@ -1,5 +1,5 @@
 import torch
-from dataset import EOS_ID
+from utils import EOS_ID
 
 
 class Beam(object):
