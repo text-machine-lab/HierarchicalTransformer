@@ -193,6 +193,11 @@ class UNetEncoder(nn.Module):
                              type_='up', d_in=layer_sizes[i])
             for i in range(depth)])
 
+        self.up_lin = nn.ModuleList([
+            nn.Linear(layer_sizes[i], layer_sizes[i])
+            for i in range(depth + 1)
+        ])
+
         self.maxpool1d = nn.MaxPool1d(3, stride=2, padding=1)
 
 
@@ -280,7 +285,7 @@ class UNetEncoder(nn.Module):
 
         ####### UP LAYERS #############
 
-        for layer, down_output, pair in zip(self.up_stack, down_outputs, layer_pairs):
+        for layer, down_output, up_lin, pair in zip(self.up_stack, down_outputs, self.up_lin[:-1], layer_pairs):
 
             # reverse ordering, since we are upsampling now instead of down
             layer_non_pad, prev_layer_non_pad = pair
@@ -294,7 +299,7 @@ class UNetEncoder(nn.Module):
             padding_mask = get_attn_mask(layer_non_pad, prev_layer_non_pad)
 
             # if not first decoder layer, we add input of previous layer with skip connection to respective down layer
-            layer_input = enc_output + down_output if enc_output is not None else down_output
+            layer_input = enc_output + up_lin(down_output) if enc_output is not None else down_output
 
             enc_output, enc_slf_attn = layer(
                 layer_input,  # HERE WE ADD OUTPUT OF PREVIOUS LAYER WITH SKIP CONNECTION FROM DOWN LAYER
@@ -311,7 +316,7 @@ class UNetEncoder(nn.Module):
         all_non_pads.append(non_pad_mask)
 
         enc_output, enc_slf_attn = self.out_layer(
-            enc_output + first_output,  # HERE WE ADD FIRST DOWN LAYER OUTPUT FOR FINAL PREDICTION
+            enc_output + self.up_lin[-1](first_output),  # HERE WE ADD FIRST DOWN LAYER OUTPUT FOR FINAL PREDICTION
             non_pad_mask=non_pad_mask,
             slf_attn_mask=slf_attn_mask)
 
