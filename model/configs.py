@@ -100,6 +100,7 @@ def get_config(parse=True, **optional_kwargs):
     parser.add_argument('--decoder_type', type=str, default='transformer')
     parser.add_argument('--max_samples', type=int, default=None)
     parser.add_argument('--save_path', type=str, default=None)
+    parser.add_argument('--decoder_per_layer_attention', action='store_true', default=False)
 
     # Generation
     parser.add_argument('--max_unroll', type=int, default=30)

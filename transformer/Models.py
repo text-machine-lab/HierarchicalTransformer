@@ -139,9 +139,10 @@ class UNetEncoder(nn.Module):
             self,
             n_src_vocab, len_max_seq, d_word_vec,
             n_layers, n_head, d_k, d_v,
-            d_model, d_inner, dropout=0.1):
+            d_model, d_inner, dropout=0.1, return_all_layers=False):
 
         super().__init__()
+        self.return_all_layers = return_all_layers
 
         n_position = len_max_seq + 1
         self.n_layers = n_layers
@@ -199,7 +200,6 @@ class UNetEncoder(nn.Module):
         ])
 
         self.maxpool1d = nn.MaxPool1d(3, stride=2, padding=1)
-
 
     def forward(self, src_seq, src_pos, src_segs=None, return_attns=False):
 
@@ -337,8 +337,11 @@ class UNetEncoder(nn.Module):
         all_encoder_layers = list(zip(all_layer_outputs, all_non_pads))
 
         # TODO allow attention on individual layers
-        return enc_output,
-        #return all_encoder_layers,
+
+        if self.return_all_layers:
+            return all_encoder_layers,
+        else:
+            return enc_output,
 
 
 class Decoder(nn.Module):
@@ -481,6 +484,7 @@ class MultiHeadAttentionGRUDecoder(nn.Module):
             return outs, None, dec_attns  # None because GRU does not do attention over itself
         return outs,
 
+
 class Transformer(nn.Module):
     ''' A sequence to sequence model with attention mechanism. '''
 
@@ -490,7 +494,7 @@ class Transformer(nn.Module):
             d_word_vec=512, d_model=512, d_inner=2048,
             n_layers=6, n_head=8, dropout=0.1,
             tgt_emb_prj_weight_sharing=True,
-            emb_src_tgt_weight_sharing=True, unet=True):
+            emb_src_tgt_weight_sharing=True):
 
         super().__init__()
         self.len_max_seq = len_max_seq
@@ -554,7 +558,8 @@ class MultiModel(nn.Module):
             d_word_vec=512, d_model=512, d_inner=2048,
             n_layers=6, n_head=8, dropout=0.1,
             tgt_emb_prj_weight_sharing=True,
-            emb_src_tgt_weight_sharing=True, encoder='transformer', decoder='transformer'):
+            emb_src_tgt_weight_sharing=True, encoder='transformer',
+            decoder='transformer', per_layer_decoder_attention=False):
 
         super().__init__()
         self.len_max_seq = len_max_seq
@@ -574,7 +579,7 @@ class MultiModel(nn.Module):
                 n_src_vocab=n_src_vocab, len_max_seq=len_max_seq,
                 d_word_vec=d_word_vec, d_model=d_model, d_inner=d_inner,
                 n_layers=n_layers, n_head=n_head, d_k=d_k, d_v=d_v,
-                dropout=dropout)
+                dropout=dropout, return_all_layers=per_layer_decoder_attention)
 
             #d_enc = self.encoder.d_enc  # custom layer sizes
 
@@ -588,7 +593,7 @@ class MultiModel(nn.Module):
                 n_tgt_vocab=n_tgt_vocab, len_max_seq=len_max_seq,
                 d_word_vec=d_word_vec, d_model=d_model, d_inner=d_inner,
                 n_layers=n_layers, n_head=n_head, d_k=d_k, d_v=d_v,
-                dropout=dropout, d_enc=d_enc)
+                dropout=dropout, d_enc=d_enc if not per_layer_decoder_attention else self.encoder.d_enc)
         elif decoder == 'gru':
             self.decoder = MultiHeadAttentionGRUDecoder(n_tgt_vocab, d_model, d_k, d_v, n_head, dropout=dropout)
         else:

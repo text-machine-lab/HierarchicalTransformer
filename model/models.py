@@ -97,8 +97,9 @@ class MULTI(nn.Module):
 
         # TODO target weight sharing is disabled!
         self.model = MultiModel(config.vocab_size, config.vocab_size, config.max_history, config.embedding_size, config.decoder_hidden_size,
-                              config.decoder_hidden_size * 4, encoder=config.encoder_type,
-                              decoder=config.decoder_type, n_layers=config.num_layers, tgt_emb_prj_weight_sharing=False)
+                                config.decoder_hidden_size * 4, encoder=config.encoder_type,
+                                decoder=config.decoder_type, n_layers=config.num_layers, tgt_emb_prj_weight_sharing=False,
+                                per_layer_decoder_attention=config.decoder_per_layer_attention)
 
         self.translator = Translator(model=self.model, beam_size=config.beam_size,
                                      max_seq_len=config.gen_response_len)

@@ -129,6 +129,10 @@ class Solver(object):
                         dim = int(param.size(0) / 3)
                         param.data[dim:2 * dim].fill_(2.0)
 
+        # here we calculate number of parameters for this model and print it out
+        pytorch_total_params = sum(p.numel() for p in self.model.parameters() if p.requires_grad)
+        print('Number of trainable parameters in this model: %s' % pytorch_total_params)
+
         if self.config.restore:
             print('Restoring model from save path')
             self.load_model(self.config.save_path)
