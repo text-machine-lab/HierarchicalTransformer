@@ -17,6 +17,7 @@ import datetime
 import re
 import math
 import pickle
+from scipy.stats import pearsonr
 import gensim
 from models import MULTI
 
@@ -144,7 +145,7 @@ class Solver(object):
         print('Number of parameters: %s' % n_params)
 
         str_config = {k: str(v) for k, v in self.config.__dict__.items()}
-        wandb.init(project='hierarchical_transformer', notes=self.config.msg, config=str_config)
+        wandb.init(project='hierarchical_transformer', notes=self.config.msg, config=str_config, allow_val_change=True)
         wandb.watch(self.model)
 
         alert = tgalert.TelegramAlert()
@@ -279,8 +280,8 @@ class Solver(object):
         #print('Test before training')
         #self.test()
 
-        #print('\n<Validation before training>...')
-        #self.validation_loss = self.evaluate()
+        print('\n<Validation before training>...')
+        self.validation_loss = self.evaluate()
 
         #word_perplexity = self.test()
 
@@ -478,6 +479,8 @@ class Solver(object):
         epoch."""
         self.model.eval()
         batch_loss_history = []
+        per_example_loss_history = []
+        per_example_length_history = []
         n_total_words = 0
 
         for batch_i, (conversations, conversation_length, sentence_length) in enumerate(tqdm(self.eval_data_loader, ncols=80)):
@@ -519,16 +522,35 @@ class Solver(object):
                         self.generate_sentence(input_sentences, input_histories, input_sentence_length, input_conversation_length, target_sentences)
 
 
-                batch_loss, n_words = masked_cross_entropy(
+                per_example_loss, n_words = masked_cross_entropy(
                     sentence_logits,
                     target_sentences,
-                    target_sentence_length)
+                    target_sentence_length, per_example=True)
+
+                # we calculate per example loss and length to find pearson correlation
+
+                batch_loss = per_example_loss.sum()
+                hist_len = (input_histories != 0).long().sum(1)
+                per_example_length_history.append(hist_len)
+
 
             assert not isnan(batch_loss.item())
+            per_example_loss_history.append(per_example_loss)
             batch_loss_history.append(batch_loss.item())
             n_total_words += n_words.item()
 
         epoch_loss = np.sum(batch_loss_history) / n_total_words
+
+        # here, we calculate pearson correlation over all losses and histories
+        all_pearson_losses = torch.cat(per_example_loss_history, 0).cpu().numpy()
+        all_pearson_lengths = torch.cat(per_example_length_history, 0).cpu().numpy()
+        p_value = pearsonr(all_pearson_losses, all_pearson_lengths)
+
+        p_value = p_value[0]
+
+        print('Pearson correlation between history length and loss:' % p_value)
+
+        wandb.config.update({'loss-length-p': p_value})
 
         #self.writer.add_scalar('val_loss', epoch_loss, self.epoch_i)
         wandb.log({'val_loss': epoch_loss})

@@ -47,7 +47,7 @@ def masked_cross_entropy(logits, target, length, per_example=False):
 
     if per_example:
         # loss: [batch_size]
-        return losses.sum(1)
+        return losses.sum(1), length.float().sum()
     else:
         loss = losses.sum()
         return loss, length.float().sum()
