@@ -1,6 +1,6 @@
 echo "######################### UNET TRANSFORMER ################################"
 
-python train.py --data=cornell --model=MULTI --batch_size=32 --n_epoch=0 --eval_batch_size=32 \
+python train.py --data=cornell --model=MULTI --batch_size=32 --n_epoch=100 --eval_batch_size=32 \
    --encoder_hidden_size=256 --decoder_hidden_size=256  --embedding_size=256 --context_size=256 \
    --encoder_type=unet --decoder_type=transformer --tg_enable --msg=full --max_history=150 \
    --full_samples_file=../data/unet_cornell_samples1.txt --max_samples=10000 --save_path=../data/unet_cornell_ckpt \

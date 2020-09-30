@@ -535,7 +535,8 @@ class Solver(object):
 
 
             assert not isnan(batch_loss.item())
-            per_example_loss_history.append(per_example_loss)
+            per_example_loss_mean = per_example_loss / target_sentence_length.to(per_example_loss.device).float()
+            per_example_loss_history.append(per_example_loss_mean)  # normalize for number of words
             batch_loss_history.append(batch_loss.item())
             n_total_words += n_words.item()
 
@@ -548,9 +549,7 @@ class Solver(object):
 
         p_value = p_value[0]
 
-        print('Pearson correlation between history length and loss:' % p_value)
-
-        wandb.config.update({'loss-length-p': p_value})
+        print('Pearson correlation between history length and loss: %s' % p_value)
 
         #self.writer.add_scalar('val_loss', epoch_loss, self.epoch_i)
         wandb.log({'val_loss': epoch_loss})
@@ -564,6 +563,8 @@ class Solver(object):
         """Evaluates per-word perplexity."""
         self.model.eval()
         batch_loss_history = []
+        per_example_length_history = []
+        per_example_loss_history = []
         n_total_words = 0
 
         if self.config.full_samples_file is not None:
@@ -619,18 +620,45 @@ class Solver(object):
                 # TODO allow generation from HRED
                 #if batch_i == 0:
                 #    self.generate_transformer_sentence(input_histories, history_segments, target_sentences)
-
-
-                batch_loss, n_words = masked_cross_entropy(
+                per_example_loss, n_words = masked_cross_entropy(
                     sentence_logits,
                     target_sentences,
-                    target_sentence_length)
+                    target_sentence_length, per_example=True)
+
+                # we calculate per example loss and length to find pearson correlation
+
+                batch_loss = per_example_loss.sum()
+                hist_len = (input_histories != 0).long().sum(1)
+                per_example_length_history.append(hist_len)
 
             assert not isnan(batch_loss.item())
+            per_example_loss_mean = per_example_loss / target_sentence_length.to(per_example_loss.device).float()
+            per_example_loss_history.append(per_example_loss_mean)  # normalize for number of words
             batch_loss_history.append(batch_loss.item())
             n_total_words += n_words.item()
 
         epoch_loss = np.sum(batch_loss_history) / n_total_words
+
+        # here, we calculate pearson correlation over all losses and histories
+        all_pearson_losses = torch.cat(per_example_loss_history, 0).cpu().numpy()
+        all_pearson_lengths = torch.cat(per_example_length_history, 0).cpu().numpy()
+        p_value = pearsonr(all_pearson_losses, all_pearson_lengths)
+
+        p_value = p_value[0]
+
+        wandb.config.update({'loss-length-p': p_value})
+        print('Pearson correlation between history and loss: %s' % p_value)
+
+        #         batch_loss, n_words = masked_cross_entropy(
+        #             sentence_logits,
+        #             target_sentences,
+        #             target_sentence_length)
+        #
+        #     assert not isnan(batch_loss.item())
+        #     batch_loss_history.append(batch_loss.item())
+        #     n_total_words += n_words.item()
+        #
+        # epoch_loss = np.sum(batch_loss_history) / n_total_words
 
         print(f'Number of words: {n_total_words}')
         print(f'Bits per word: {epoch_loss:.3f}')
