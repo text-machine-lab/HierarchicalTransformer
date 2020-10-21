@@ -7,6 +7,8 @@ This is a repository to add hierarchy to the Transformer. It is currently under 
 In addition to a fork from jadore801120 Transformer repository, also used baseline code from this repository:
 https://github.com/ctr4si/A-Hierarchical-Latent-Structure-for-Variational-Conversation-Modeling
 
+Due to the combination of different repositories in one, the structure is a bit layered to say the least.
+
 MIT licenses for each can be found in the licenses folder.
 
 # Installation
